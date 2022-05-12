@@ -14,7 +14,7 @@ import data
 from transformer_model import next_char_transformer
 
 parser = argparse.ArgumentParser(description='Phoneme-level Transformer Language Model')
-parser.add_argument('--data', type=str, default='./experiment/EnglishNA2/prepared',
+parser.add_argument('--data', type=str, default='./experiment/EnglishNA_debug/prepared',
                     help='location of the data corpus')
 parser.add_argument('--hidden_size', type=int, default=512,
                     help='size of word embeddings')
@@ -42,8 +42,8 @@ parser.add_argument('--cuda', action='store_true',
                     help='use CUDA')
 parser.add_argument('--log-interval', type=int, default=200, metavar='N',
                     help='report interval')
-parser.add_argument('--save', type=str, default='model.pt',
-                    help='path to save the final model')
+parser.add_argument('--save', type=str, default='model_training',
+                    help='folder to save the final model and training info')
 parser.add_argument('--onnx-export', type=str, default='',
                     help='path to export the final model in onnx format')
 args = parser.parse_args()
@@ -55,6 +55,24 @@ if torch.cuda.is_available():
         print("WARNING: You have a CUDA device, so you should probably run with --cuda")
 
 device = torch.device("cuda" if args.cuda else "cpu")
+
+###############################################################################
+# Prepare output folder
+###############################################################################
+
+
+if not os.path.exists(args.save):
+    print(f'Creating directory {args.save} to save output')
+    os.mkdir(args.save)
+args_string = '\n'.join(str(args)[10:-1].split(', '))
+print('Running with arguments:\n' + args_string)
+args_filename = os.path.join(args.save, 'args.txt')
+with open(args_filename, 'w') as args_file:
+    args_file.write(args_string)
+    print(f'Saved arguments to {args_filename}')
+
+model_path = os.path.join(args.save, 'model.pt')
+training_stats_path = os.path.join(args.save, 'training_stats.txt')
 
 ###############################################################################
 # Load data
@@ -77,6 +95,19 @@ class AverageMeter(object):
         self.sum += val * n
         self.count += n
         self.avg = self.sum / self.count
+
+class TrainingStats():
+    """Stores training and validation loss over time"""
+    def __init__(self):
+        self.training_losses = []
+        self.validation_losses = []
+        self.best_validation_epoch = 0
+
+    def save(self, path):
+        with open(path, 'w') as save_path:
+            save_path.write(f'Training losses: {self.training_losses}\n')
+            save_path.write(f'Validation losses: {self.validation_losses}\n')
+            save_path.write(f'Best validation epoch: {self.best_validation_epoch}')
 
 import os
 import hashlib
@@ -244,15 +275,19 @@ for p in model.parameters():
 
 print('Number of parameters: {}'.format(num_params))
 
+
 # At any point you can hit Ctrl + C to break out of training early.
 try:
+    stats = TrainingStats()
     for epoch in range(1, args.epochs + 1):
         epoch_start_time = time.time()
         train_loss = train()
+        stats.training_losses.append(train_loss)
         print('| end of epoch {:3d} | time: {:5.2f}s | train loss {:5.2f} | '
               'train ppl {:8.2f} | train bpc {:8.3f}'.format(epoch, (time.time() - epoch_start_time),
                                          train_loss, math.exp(train_loss), train_loss / math.log(2)))
         val_loss = evaluate(val_data)
+        stats.validation_losses.append(val_loss)
         print('-' * 89)
         print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '
               'valid ppl {:8.2f} | valid bpc {:8.3f}'.format(epoch, (time.time() - epoch_start_time),
@@ -260,16 +295,23 @@ try:
         print('-' * 89)
         # Save the model if the validation loss is the best we've seen so far.
         if not best_val_loss or val_loss < best_val_loss:
-            with open(args.save, 'wb') as f:
+            with open(model_path, 'wb') as f:
                 torch.save(model, f)
             best_val_loss = val_loss
+            stats.best_validation_epoch = epoch
         model.update(epoch // args.epochs)
+
 except KeyboardInterrupt:
     print('-' * 89)
     print('Exiting from training early')
 
+# Save training stats
+stats.save(training_stats_path)
+print(f'Saved training stats to {training_stats_path}')
+
 # Load the best saved model.
-with open(args.save, 'rb') as f:
+with open(model_path, 'rb') as f:
+    print(f'Loading best model from {model_path}')
     model = torch.load(f)
 
 # Run on test data.
