@@ -63,7 +63,7 @@ device = torch.device("cuda" if args.cuda else "cpu")
 
 if not os.path.exists(args.save):
     print(f'Creating directory {args.save} to save output')
-    os.mkdir(args.save)
+    os.makedirs(args.save)
 args_string = '\n'.join(str(args)[10:-1].split(', '))
 print('Running with arguments:\n' + args_string)
 args_filename = os.path.join(args.save, 'args.txt')
