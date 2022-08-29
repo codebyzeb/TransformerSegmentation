@@ -2,7 +2,7 @@ import copy
 import torch
 import torch.nn as nn
 
-from annotated_attention import AddPositionalEncoding, MultiHeadedAttention, SublayerConnection, clones, PositionwiseFeedForward, Generator, Embeddings
+from .annotated_attention import AddPositionalEncoding, MultiHeadedAttention, SublayerConnection, clones, PositionwiseFeedForward, Generator, Embeddings
 
 class EncoderLayer(nn.Module):
     """Encoder is made up of self-attn and feed forward (defined below)"""

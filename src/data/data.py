@@ -1,8 +1,10 @@
 import os
 import torch
+import logging
 
 from collections import Counter
 
+logger = logging.getLogger(__name__)
 
 class Dictionary(object):
     def __init__(self):
@@ -78,12 +80,12 @@ class Corpus(object):
             
             assert token == len(tokenized_lines) * self.max_utterance_length
         
-        print(f'Found {len(lines)} utterances in {path}')
+        logging.info(f'Found {len(lines)} utterances in {path}')
         if long_utterances > 0:
             if self.truncate_long_utterances:
-                print(f'Truncated {long_utterances} utterances that were longer than max sequence length of {self.max_utterance_length}')
+                logging.info(f'Truncated {long_utterances} utterances that were longer than max sequence length of {self.max_utterance_length}')
             else:
-                print(f'Discarded {long_utterances} utterances that were longer than max sequence length of {self.max_utterance_length}')
-        print(f'Saved {len(tokenized_lines)} utterances')
+                logging.info(f'Discarded {long_utterances} utterances that were longer than max sequence length of {self.max_utterance_length}')
+        logging.info(f'Saved {len(tokenized_lines)} utterances')
 
         return ids
