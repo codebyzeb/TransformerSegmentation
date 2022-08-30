@@ -22,7 +22,7 @@
 #! Note that the job submission script will enforce no more than 32 cpus per GPU.
 #SBATCH --gres=gpu:1
 #! How much wallclock time will be required?
-#SBATCH --time=12:00:00
+#SBATCH --time=11:15:00
 #! What types of email messages do you wish to receive?
 #SBATCH --mail-type=ALL
 #! Uncomment this to prevent the job from being requeued (e.g. if
@@ -109,4 +109,9 @@ echo -e "\nnumtasks=$numtasks, numnodes=$numnodes, mpi_tasks_per_node=$mpi_tasks
 
 echo -e "\nExecuting command:\n==================\n$CMD\n"
 
-eval $CMD 
+# after 11 hours sends SIGINT 5 minutes later send SIGKILL
+timeout -s SIGINT --kill-after=5m 1h $CMD
+if [[ $? -eq 124 ]]; then
+  cd scripts
+  sbatch run_model.wilkes3 $runpath $runid
+fi
