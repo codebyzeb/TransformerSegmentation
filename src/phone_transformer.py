@@ -51,6 +51,7 @@ class TrainingStats(object):
             save_path.write(f'Training losses: {self.training_losses}\n')
             save_path.write(f'Validation losses: {self.validation_losses}\n')
             save_path.write(f'Best validation epoch: {self.best_validation_epoch}')
+
 class PhoneTransformer(object):
     """
     Orchestrates model loading, training and evaluation using a specific 
@@ -101,7 +102,10 @@ class PhoneTransformer(object):
             corpus = torch.load(fn)
         else:
             logging.info('Producing dataset...')
-            corpus = data.Corpus(data_dir, sequence_length, False)
+            if "text8" in data_dir:
+                corpus = data.Corpus(data_dir, sequence_length, truncate_long_utterances=False, raw_text=True)
+            else:
+                corpus = data.Corpus(data_dir, sequence_length, truncate_long_utterances=False)
             torch.save(corpus, fn)
 
         batch_size = self.config.getint('TRAINING', 'batch_size')
@@ -139,11 +143,11 @@ class PhoneTransformer(object):
             total_loss = AverageMeter()
             model.eval()
             ntokens = len(corpus.dictionary)
-            step = 1
+            step = sequence_length
             with torch.no_grad():
                 # Original code slid a window along of size 1, rather than per-utterance
-                #for batch, i in enumerate(range(0, data_source.size(0) - 1 - args.bptt, step)):
-                for batch, i in enumerate(range(0, data_source.data.size(0) - 1, sequence_length)):
+                for batch, i in enumerate(range(0, data_source.data.size(0) - 1 - sequence_length, step)):
+                #for batch, i in enumerate(range(0, data_source.data.size(0) - 1, sequence_length)):
                     data, target, data_mask, target_mask = data_source.get_batch(i)
                     output = model(data, target_mask)
                     _, last_loss = model.criterion(output, target)
@@ -153,6 +157,7 @@ class PhoneTransformer(object):
         def train():
             # Turn on training mode which enables dropout.
             model.train()
+            current_loss = AverageMeter()
             total_loss = AverageMeter()
             start_time = time.time()
             ntokens = len(corpus.dictionary)
@@ -164,21 +169,19 @@ class PhoneTransformer(object):
                 loss.backward()
                 optimizer.step()
 
+                current_loss.update(last_loss.item(), data.size(0))
                 total_loss.update(last_loss.item(), data.size(0))
 
                 if batch % log_interval == 0 and batch > 0:
-                    cur_loss = total_loss.avg
+                    avg_loss = current_loss.avg
                     elapsed = time.time() - start_time
                     logging.info('| epoch {:3d} | {:5d}/{:5d} batches | ms/batch {:5.2f} | '
                         'loss {:5.2f} | ppl {:8.2f} | bpc {:8.3f}'.format(
                         epoch, batch, len(train_data.data) // sequence_length,
-                        elapsed * 1000 / log_interval, cur_loss,
-                        math.exp(cur_loss), cur_loss / math.log(2)))
-                    total_loss.reset()
+                        elapsed * 1000 / log_interval, avg_loss,
+                        math.exp(avg_loss), avg_loss / math.log(2)))
+                    current_loss.reset()
                     start_time = time.time()
-
-                if batch % 10000 == 0 and batch > 0:
-                    break
 
             return total_loss.avg
 
