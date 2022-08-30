@@ -2,9 +2,13 @@ import os
 import torch
 import logging
 
+import numpy as np
+
 from collections import Counter
 
 logger = logging.getLogger(__name__)
+
+PAD = 0
 
 class Dictionary(object):
     def __init__(self):
@@ -27,6 +31,10 @@ class Dictionary(object):
 
 
 class Corpus(object):
+    """ Stores a corpus, split according to train-valid-test. Sequences have a maximum length
+    and are stored as IDs rather than word tokens.
+    """
+
     def __init__(self, path, max_utterance_length=64, truncate_long_utterances=False):
         self.max_utterance_length = max_utterance_length
         self.truncate_long_utterances = truncate_long_utterances
@@ -34,6 +42,7 @@ class Corpus(object):
         self.dictionary = Dictionary()
         self.dictionary.add_word('<pad>')
         self.dictionary.add_word('<ub>')
+        assert PAD == self.dictionary.word2idx["<pad>"]
 
         self.train = self.tokenize(os.path.join(path, 'train.txt'))
         self.valid = self.tokenize(os.path.join(path, 'valid.txt'))
@@ -89,3 +98,77 @@ class Corpus(object):
         logging.info(f'Saved {len(tokenized_lines)} utterances')
 
         return ids
+
+# mask subsequent entries
+def subsequent_mask(size):
+    """Mask out subsequent positions."""
+    attn_shape = (1, size, size)
+    subsequent_mask = np.triu(np.ones(attn_shape), k=1).astype('uint8')
+    return torch.from_numpy(subsequent_mask) == 0
+
+
+def make_std_mask(tgt):
+    """Create a mask to hide padding and future words."""
+    tgt_mask = (tgt != PAD).unsqueeze(-2)
+    tgt_mask = tgt_mask & subsequent_mask(tgt.size(-1)).type_as(tgt_mask)
+    return tgt_mask
+
+class BatchedData():
+    """ Starting from sequential data, batches it into columns for efficient processing. """
+
+    # Starting from sequential data, arranges the dataset into columns.
+    # For instance, with the alphabet as the sequence and batch size 4, we'd get
+    # ┌ a g m s ┐
+    # │ b h n t │
+    # │ c i o u │
+    # │ d j p v │
+    # │ e k q w │
+    # └ f l r x ┘.
+    # These columns are treated as independent by the model, which means that the
+    # dependence of e. g. 'g' on 'f' can not be learned, but allows more efficient
+    # batch processing.
+
+    def __init__(self, data, batch_size, sequence_length, base_device, is_train):
+        self.sequence_length = sequence_length
+        self.base_device = base_device
+        self.is_train = is_train
+
+        # Work out how cleanly we can divide the dataset into batch_size parts.
+        # Also ensure that each batch starts at the start of an utterance
+        nbatch = data.size(0) // (batch_size * self.sequence_length)
+        # Trim off any extra elements that wouldn't cleanly fit (remainders).
+        data = data.narrow(0, 0, nbatch * batch_size * self.sequence_length)
+        # Evenly divide the data across the batch_size batches.
+        data = data.view(batch_size, -1).t().contiguous()
+        self.data = data.to(self.base_device)
+
+    # get_batch subdivides the data into chunks of length args.bptt.
+    # If source is equal to the example output of the batchify function, with
+    # a bptt-limit of 2, we'd get the following two Variables for i = 0:
+    # ┌ a g m s ┐ ┌ b h n t ┐
+    # └ b h n t ┘ └ c i o u ┘
+    # Note that despite the name of the function, the subdivison of data is not
+    # done along the batch dimension (i.e. dimension 1), since that was handled
+    # by the batchify function. The chunks are along dimension 0, corresponding
+    # to the seq_len dimension in the LSTM.
+
+    def get_batch(self, i):
+        if self.is_train:
+            #i = torch.randint(low=0, high=(len(source) - args.bptt), size=(1,)).long().item()
+            i = torch.randint(low=0, high=(len(self.data) // self.sequence_length), size=(1,)).long().item() * self.sequence_length
+        #else:
+            # seq_len = min(args.bptt, len(source) - 1 - i)
+            # target = source[i + seq_len, :]
+            # target = source[i + 1:i + 1 + seq_len].t()
+
+        seq_len = min(self.sequence_length, len(self.data) - 1 - i)
+        target = self.data[i + 1:i + 1 + seq_len].t()
+        data = self.data[i:i + seq_len].t()
+
+        data_mask = (data != PAD).unsqueeze(-2)
+        target_mask = make_std_mask(data.long())
+
+        # reshape target to match what cross_entropy expects
+        target = target.contiguous().view(-1)
+
+        return data, target, data_mask, target_mask
