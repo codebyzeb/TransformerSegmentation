@@ -29,15 +29,15 @@ def main():
     if os.path.exists(run_file_path): 
         # we must be resuming a run - reading in relevant information
         with open(run_file_path, "r") as f: 
-            resume_num_task_batches = int(f.readline())
+            resume_num_epochs = int(f.readline())
     else: 
-        resume_num_task_batches = 0 
+        resume_num_epochs = 0 
 
     # Setting up logging, config read in and seed setting
-    config = setup(args.Path, run_id, resume_num_task_batches)
+    config = setup(args.Path, run_id, resume_num_epochs)
     
     # Initializing problyglot with configuration and options
-    phonetransformer = PhoneTransformer(config, resume_num_task_batches)
+    phonetransformer = PhoneTransformer(config, resume_num_epochs)
 
     # setting up timeout handler - called if the program receives a SIGINT either from the user
     # or from SLURM if it is about to timeout

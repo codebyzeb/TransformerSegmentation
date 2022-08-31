@@ -110,8 +110,8 @@ echo -e "\nnumtasks=$numtasks, numnodes=$numnodes, mpi_tasks_per_node=$mpi_tasks
 echo -e "\nExecuting command:\n==================\n$CMD\n"
 
 # after 11 hours sends SIGINT 5 minutes later send SIGKILL
-timeout -s SIGINT --kill-after=5m 1h $CMD
+timeout -s SIGINT --kill-after=10m 11h $CMD
 if [[ $? -eq 124 ]]; then
   cd scripts
-  sbatch run_model.wilkes3 $runpath $runid
+  sbatch slurm_submit.wilkes3 $runpath $runid
 fi

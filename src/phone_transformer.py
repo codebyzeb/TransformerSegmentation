@@ -69,6 +69,28 @@ class PhoneTransformer(object):
         self.model = self.load_model()
         self.optimizer = self.load_optimizer()
 
+        # NOTE: possibly load in learner checkpoint
+        # if num_epochs is 0 at the start of training, then we are resuming training 
+        if self.num_epochs > 0:
+            checkpoint_file = "latest-checkpoint.pt"
+            checkpoint_run = None
+        else:
+            checkpoint_file = self.config.get("EXPERIMENT", "checkpoint_file", fallback="")
+            checkpoint_run = self.config.get("EXPERIMENT", "checkpoint_run", fallback="")
+
+        if checkpoint_file:
+            if not self.use_wandb:
+                logger.warning("Could not load in checkpoint file, use_wandb is set to False")
+            else:
+                logger.info(f"Loading in checkpoint file: {checkpoint_file}")
+                wandb_checkpoint = wandb.restore(checkpoint_file, run_path=checkpoint_run)
+                checkpoint = torch.load(wandb_checkpoint.name)
+                self.model.load_state_dict(checkpoint['learner_state_dict'], strict=False)
+                self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+                os.rename(os.path.join(wandb.run.dir, checkpoint_file),
+                          os.path.join(wandb.run.dir, "loaded_checkpoint.pt"))
+        else:
+            logger.info("No checkpoint used - learning from scratch")
 
         if self.use_wandb:
             # setting up metrics for logging to wandb
@@ -123,39 +145,44 @@ class PhoneTransformer(object):
         optimizer = optim.SGD(self.model.parameters(), lr, momentum)
         return optimizer
 
+    def save_checkpoint(self, model_name):
+        if not self.use_wandb:
+            logger.error("Cannot save model checkpoint because use_wandb set to False")
+        else:
+            logger.info(f"Saving model checkpoint")
+            checkpoint = {
+                'learner_state_dict': self.model.state_dict(),
+                'optimizer_state_dict': self.optimizer.state_dict(),
+            }
+            # save latest checkpoint
+            torch.save(checkpoint, os.path.join(wandb.run.dir, model_name))
+
     def timeout_handler(self, signum, frame):
         """
         Gracefully handles early termination signals. Catches termination signals sent from  
-        slurm just before the program is about to terminate and saved out a model checkpoint.
+        slurm just before the program is about to terminate and saves out a model checkpoint.
         """
 
         logger.info("Timeout (SIGINT) termination signal received")
-        logger.info("Attempting to save final checkpoint of model")
+        logger.info("Saving training state")
 
-        if self.config.getboolean('EXPERIMENT', 'save_latest_checkpoint', fallback=True):
-            if not self.use_wandb:
-                logger.error("Cannot save model checkpoint because use_wandb set to False")
+        if not self.use_wandb:
+            logger.error("Cannot save epoch number because use_wandb set to False")
+        else:
+            checkpoint_file = os.path.join(wandb.run.dir, "latest-checkpoint.pt")
+            if not os.path.exists(checkpoint_file):
+                logger.error(f"No checkpoint file found at {checkpoint_file}, can't save state")
             else:
-                logger.info(f"Saving model checkpoint")
-                checkpoint = {
-                    'learner_state_dict': self.model.state_dict(),
-                    'optimizer_state_dict': self.optimizer.state_dict(),
-                }
-                # forcing move to save out latest checkpoint before spawning new job
-                torch.save(checkpoint, os.path.join(wandb.run.dir, "latest-checkpoint.pt"))
+                logger.info(f"Saving latest checkpoint to wandb")
                 wandb.save('latest-checkpoint.pt', policy="now")
 
-                # writing out the current epoch number to the run_file 
                 if not os.path.exists('tmp'):
                     os.mkdir('tmp')
                 with open(f"tmp/{wandb.run.id}.runfile", "w+") as f:
-                    f.write(str(max(self.num_epochs-1, 0)))
-        else:
-            logger.error("Failed to save checkpoint - save_latest_checkpoint set to False")
+                    logger.info(f"Saving current epoch number to tmp/{wandb.run.id}.runfile")
+                    f.write(str(max(self.num_epochs, 0)))
 
-        self.shutdown_processes()
-
-        # exit code 124 triggers re-run
+        logger.info("Calling exit code 124 to trigger a rerun")
         exit(124)
 
     def __call__(self) -> None: 
@@ -242,49 +269,45 @@ class PhoneTransformer(object):
         # Training loop
         ###############################################################################
 
-        try:
-            for epoch in range(self.num_epochs, epochs + 1):
-                epoch_start_time = time.time()
-                train_loss = train()
+        for epoch in range(self.num_epochs, epochs + 1):
+            epoch_start_time = time.time()
+            self.num_epochs = epoch
+            train_loss = train()
 
-                # Logging training results
-                logging.info('| end of epoch {:3d} | time: {:5.2f}s | train loss {:5.2f} | '
-                    'train ppl {:8.2f} | train bpc {:8.3f}'.format(epoch, (time.time() - epoch_start_time),
-                                                train_loss, math.exp(train_loss), train_loss / math.log(2)))
-                wandb.log({"train.loss": train_loss,},)
+            # Logging training results
+            logging.info('| end of epoch {:3d} | time: {:5.2f}s | train loss {:5.2f} | '
+                'train ppl {:8.2f} | train bpc {:8.3f}'.format(epoch, (time.time() - epoch_start_time),
+                                            train_loss, math.exp(train_loss), train_loss / math.log(2)))
 
-                val_loss = evaluate(val_data)
+            val_loss = evaluate(val_data)
 
-                # Logging validation results
-                logging.info('-' * 89)
-                logging.info('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '
-                    'valid ppl {:8.2f} | valid bpc {:8.3f}'.format(epoch, (time.time() - epoch_start_time),
-                                                val_loss, math.exp(val_loss), val_loss / math.log(2)))
-                logging.info('-' * 89)
-                wandb.log({"valid.loss": val_loss, "num_epochs": epoch},)
-                
-                # Save the model if the validation loss is the best we've seen so far.
-                if not best_val_loss or val_loss < best_val_loss:
-                    best_val_loss = val_loss
-                    if self.config.getboolean('EXPERIMENT', 'save_best_model', fallback=True):
-                        if not self.use_wandb:
-                            logger.error("Cannot save best model seen so far because use_wandb set to False")
-                        else:
-                            best_file = os.path.join(wandb.run.dir, f"best.pt")
-                            logger.info(f"Saving best model seen so far to {best_file}")
-                            checkpoint = {
-                                'learner_state_dict': self.model.state_dict(),
-                                'optimizer_state_dict': self.optimizer.state_dict(),
-                            }
-                            torch.save(checkpoint, best_file)
-
-                # Let the model know how far through training we are for intermediate layer losses
-                self.model.update(epoch // epochs)
-                self.num_epochs = epoch
-
-        except KeyboardInterrupt:
+            # Logging validation results
             logging.info('-' * 89)
-            logging.info('Exiting from training early')
+            logging.info('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '
+                'valid ppl {:8.2f} | valid bpc {:8.3f}'.format(epoch, (time.time() - epoch_start_time),
+                                            val_loss, math.exp(val_loss), val_loss / math.log(2)))
+            logging.info('-' * 89)
+            wandb.log({"train.loss": train_loss, "valid.loss": val_loss, "num_epochs": epoch},)
+            
+            # Save the model if the validation loss is the best we've seen so far.
+            if not best_val_loss or val_loss < best_val_loss:
+                best_val_loss = val_loss
+                if self.config.getboolean('EXPERIMENT', 'save_best_model', fallback=True):
+                    logger.info("New best model found - saving checkpoint")
+                    self.save_checkpoint("best.pt")
+                else:
+                    logger.info("Didn't save best model seen so far - save_best_model set to False")
+
+            # Let the model know how far through training we are for intermediate layer losses
+            self.model.update(epoch // epochs)
+
+            # Save a checkpoint
+            if self.config.getboolean('EXPERIMENT', 'save_latest_checkpoint', fallback=True):
+                logger.info("Saving a checkpoint at the end of the epoch")
+                self.save_checkpoint("latest-checkpoint.pt")
+            else:
+                logger.error("Failed to save checkpoint - save_latest_checkpoint set to False")
+
 
         ###############################################################################
         # Final cleanup
@@ -309,13 +332,7 @@ class PhoneTransformer(object):
         logging.info('=' * 89)
 
         if self.config.getboolean('EXPERIMENT', 'save_final_model', fallback=True):
-            if not self.use_wandb:
-                logger.error("Cannot save model checkpoint because use_wandb set to False")
-            else:
-                logger.info(f"Saving trained model")
-                checkpoint = {
-                    'learner_state_dict': self.model.state_dict(),
-                    'optimizer_state_dict': self.optimizer.state_dict(),
-                }
-                torch.save(checkpoint, os.path.join(wandb.run.dir, f"final.pt"))
-                # NOTE: checkpoint will be uploaded to wandb on exiting program
+            logger.info("Saving final model")
+            self.save_checkpoint("final.pt")
+        else:
+            logger.info("Could not save final model - save_final_model set to False")
