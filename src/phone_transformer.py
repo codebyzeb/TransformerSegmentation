@@ -113,7 +113,7 @@ class PhoneTransformer(object):
             if "text8" in data_dir:
                 corpus = data.Corpus(data_dir, self.sequence_length, truncate_long_utterances=False, raw_text=True)
             else:
-                corpus = data.Corpus(data_dir, self.sequence_length, truncate_long_utterances=False)
+                corpus = data.Corpus(data_dir, self.sequence_length, truncate_long_utterances=False, raw_test=False)
             torch.save(corpus, fn)
         return corpus
 
@@ -126,11 +126,12 @@ class PhoneTransformer(object):
         n_layers = self.config.getint('MODEL', 'n_layers', fallback=16)
         dropout = self.config.getfloat('MODEL', 'dropout', fallback=0.1)
         tied = self.config.getboolean('MODEL', 'tied', fallback=False)
+        inner_linear = self.config.getint('MODEL', 'inner_linear', fallback=2048)
         sequence_length = self.config.getint('TRAINING', 'sequence_length')
         
         model = next_char_transformer(vocab_size, hidden_size=hidden_size, n_layers=n_layers,
                                     dropout=dropout, tied=tied, max_sequence_len=sequence_length,
-                                    intermediate_losses=True).to(self.base_device)
+                                    intermediate_losses=True, inner_linear=inner_linear).to(self.base_device)
 
         num_params = sum([p.numel() for p in model.parameters()])
         logging.info('Number of parameters: {}'.format(num_params))
@@ -149,13 +150,14 @@ class PhoneTransformer(object):
         if not self.use_wandb:
             logger.error("Cannot save model checkpoint because use_wandb set to False")
         else:
-            logger.info(f"Saving model checkpoint")
+            model_path = os.path.join(wandb.run.dir, model_name)
+            logger.info(f"Saving model checkpoint to {model_path}")
             checkpoint = {
                 'learner_state_dict': self.model.state_dict(),
                 'optimizer_state_dict': self.optimizer.state_dict(),
             }
             # save latest checkpoint
-            torch.save(checkpoint, os.path.join(wandb.run.dir, model_name))
+            torch.save(checkpoint, model_path)
 
     def timeout_handler(self, signum, frame):
         """
@@ -220,13 +222,12 @@ class PhoneTransformer(object):
         best_val_loss = None
         epochs = self.config.getint('TRAINING', 'epochs', fallback=2)
 
-        def evaluate(data_source):
+        def evaluate(data_source, step=1):
             # Turn on evaluation mode which disables dropout.
             total_loss = AverageMeter()
             self.model.eval()
-            step = self.sequence_length
             with torch.no_grad():
-                # Original code slid a window along of size 1, rather than per-utterance
+                # Original code slid a window along of size `step`, rather than per-utterance
                 for batch, i in enumerate(range(0, data_source.data.size(0) - 1 - self.sequence_length, step)):
                 #for batch, i in enumerate(range(0, data_source.data.size(0) - 1, sequence_length)):
                     data, target, data_mask, target_mask = data_source.get_batch(i)
@@ -279,7 +280,7 @@ class PhoneTransformer(object):
                 'train ppl {:8.2f} | train bpc {:8.3f}'.format(epoch, (time.time() - epoch_start_time),
                                             train_loss, math.exp(train_loss), train_loss / math.log(2)))
 
-            val_loss = evaluate(val_data)
+            val_loss = evaluate(val_data, step=self.sequence_length//4)
 
             # Logging validation results
             logging.info('-' * 89)
@@ -327,8 +328,8 @@ class PhoneTransformer(object):
         # Run on test data.
         test_loss = evaluate(test_data)
         logging.info('=' * 89)
-        logging.info('| End of training | test loss {:5.2f} | test ppl {:8.2f}'.format(
-            test_loss, math.exp(test_loss)))
+        logging.info('| End of training | test loss {:5.2f} | test ppl {:8.2f} | test bpc {:8.3f}'.format(
+            test_loss, math.exp(test_loss), test_loss / math.log(2)))
         logging.info('=' * 89)
 
         if self.config.getboolean('EXPERIMENT', 'save_final_model', fallback=True):

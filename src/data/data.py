@@ -38,7 +38,7 @@ class Corpus(object):
     utterance length and padding it otherwise. Each split of the data is stored as a single
     long tensor of token IDs.
 
-    Expects space-delimited characters, but can also tokenize raw text if raw_text is true. In
+    Expects space-delimited characters, but can also tokenize raw text if `raw_text` is true. In
     this case, lines are not truncated.
     """
 
