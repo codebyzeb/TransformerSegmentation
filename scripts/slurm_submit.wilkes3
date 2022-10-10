@@ -112,6 +112,5 @@ echo -e "\nExecuting command:\n==================\n$CMD\n"
 # after 11 hours sends SIGINT 5 minutes later send SIGKILL
 timeout -s SIGINT --kill-after=10m 11h $CMD
 if [[ $? -eq 124 ]]; then
-  cd scripts
-  sbatch slurm_submit.wilkes3 $runpath $runid
+  sbatch scripts/slurm_submit.wilkes3 $runpath $runid
 fi
