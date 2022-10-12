@@ -5,7 +5,8 @@ import typing
 import torch
 import logging 
 import time 
-import os 
+import os
+import wandb
 
 import math
 import random
@@ -39,33 +40,152 @@ class AverageMeter(object):
         self.count += n
         self.avg = self.sum / self.count
 
-class TrainingStats(object):
-    """Stores training and validation loss over time"""
-    def __init__(self):
-        self.training_losses = []
-        self.validation_losses = []
-        self.best_validation_epoch = 0
-
-    def save(self, path):
-        with open(path, 'w') as save_path:
-            save_path.write(f'Training losses: {self.training_losses}\n')
-            save_path.write(f'Validation losses: {self.validation_losses}\n')
-            save_path.write(f'Best validation epoch: {self.best_validation_epoch}')
 class PhoneTransformer(object):
     """
     Orchestrates model loading, training and evaluation using a specific 
     the next char transformer.
     """
     
-    def __init__(self, config):
+    def __init__(self, config, resume_num_epochs=0):
         """ Initialize base model based on a config 
         """
 
         # config params need to be accessed by several methods
         self.config = config
 
+        # whether to log out information to w&b
+        self.use_wandb = config.getboolean('EXPERIMENT', 'use_wandb', fallback=True)
+
         self.base_device = config.get('TRAINING', 'device', fallback=DEFAULT_DEVICE)
         logger.info(f'Running phone transformer on device: {self.base_device}')
+
+        # setting num_epochs before learner, to inform model if we are resuming training 
+        # or starting fresh 
+        self.num_epochs = resume_num_epochs if resume_num_epochs else 0
+
+        # Load corpus, model and optimiser
+        self.sequence_length = self.config.getint('TRAINING', 'sequence_length')
+        self.corpus = self.load_corpus()
+        self.model = self.load_model()
+        self.optimizer = self.load_optimizer()
+
+        # NOTE: possibly load in learner checkpoint
+        # if num_epochs is 0 at the start of training, then we are resuming training 
+        if self.num_epochs > 0:
+            checkpoint_file = "latest-checkpoint.pt"
+            checkpoint_run = None
+        else:
+            checkpoint_file = self.config.get("EXPERIMENT", "checkpoint_file", fallback="")
+            checkpoint_run = self.config.get("EXPERIMENT", "checkpoint_run", fallback="")
+
+        if checkpoint_file:
+            if not self.use_wandb:
+                logger.warning("Could not load in checkpoint file, use_wandb is set to False")
+            else:
+                logger.info(f"Loading in checkpoint file: {checkpoint_file}")
+                wandb_checkpoint = wandb.restore(checkpoint_file, run_path=checkpoint_run)
+                checkpoint = torch.load(wandb_checkpoint.name)
+                self.model.load_state_dict(checkpoint['learner_state_dict'], strict=False)
+                self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+                os.rename(os.path.join(wandb.run.dir, checkpoint_file),
+                          os.path.join(wandb.run.dir, "loaded_checkpoint.pt"))
+        else:
+            logger.info("No checkpoint used - learning from scratch")
+
+        if self.use_wandb:
+            # setting up metrics for logging to wandb
+            # counter tracks number of batches of tasks seen by metalearner
+            wandb.define_metric("num_epochs")
+
+    def load_corpus(self):
+        """ Load corpus being used """
+        data_dir = self.config.get('DATASET', 'root_path', fallback="")
+        if not data_dir:
+            logger.exception('No training data specified.')
+            raise Exception('No training data specified')
+
+        fn = 'corpus.{}.data'.format(hashlib.md5(data_dir.encode()).hexdigest())
+        if os.path.exists(fn):
+            logging.info('Loading cached dataset...')
+            corpus = torch.load(fn)
+        else:
+            logging.info('Producing dataset...')
+            if "text8" in data_dir:
+                corpus = data.Corpus(data_dir, self.sequence_length, truncate_long_utterances=False, raw_text=True)
+            else:
+                corpus = data.Corpus(data_dir, self.sequence_length, truncate_long_utterances=False, raw_test=False)
+            torch.save(corpus, fn)
+        return corpus
+
+    def load_model(self):
+        """ Either build model or load model from a checkpoint """
+        # TODO: add model loading from checkpoint
+        logging.info('Building model...')
+        vocab_size = len(self.corpus.dictionary)
+        hidden_size = self.config.getint('MODEL', 'hidden_size', fallback=64)
+        n_layers = self.config.getint('MODEL', 'n_layers', fallback=16)
+        dropout = self.config.getfloat('MODEL', 'dropout', fallback=0.1)
+        tied = self.config.getboolean('MODEL', 'tied', fallback=False)
+        inner_linear = self.config.getint('MODEL', 'inner_linear', fallback=2048)
+        sequence_length = self.config.getint('TRAINING', 'sequence_length')
+        
+        model = next_char_transformer(vocab_size, hidden_size=hidden_size, n_layers=n_layers,
+                                    dropout=dropout, tied=tied, max_sequence_len=sequence_length,
+                                    intermediate_losses=True, inner_linear=inner_linear).to(self.base_device)
+
+        num_params = sum([p.numel() for p in model.parameters()])
+        logging.info('Number of parameters: {}'.format(num_params))
+
+        return model
+
+    def load_optimizer(self):
+        """ Either build optimiser or load from a checkpoint """
+        # TODO: add loading optimiser from checkpoint
+        lr = self.config.getfloat('TRAINING', 'lr', fallback=0.003)
+        momentum = self.config.getfloat('TRAINING', 'momentum', fallback=0.99)
+        optimizer = optim.SGD(self.model.parameters(), lr, momentum)
+        return optimizer
+
+    def save_checkpoint(self, model_name):
+        if not self.use_wandb:
+            logger.error("Cannot save model checkpoint because use_wandb set to False")
+        else:
+            model_path = os.path.join(wandb.run.dir, model_name)
+            logger.info(f"Saving model checkpoint to {model_path}")
+            checkpoint = {
+                'learner_state_dict': self.model.state_dict(),
+                'optimizer_state_dict': self.optimizer.state_dict(),
+            }
+            # save latest checkpoint
+            torch.save(checkpoint, model_path)
+
+    def timeout_handler(self, signum, frame):
+        """
+        Gracefully handles early termination signals. Catches termination signals sent from  
+        slurm just before the program is about to terminate and saves out a model checkpoint.
+        """
+
+        logger.info("Timeout (SIGINT) termination signal received")
+        logger.info("Saving training state")
+
+        if not self.use_wandb:
+            logger.error("Cannot save epoch number because use_wandb set to False")
+        else:
+            checkpoint_file = os.path.join(wandb.run.dir, "latest-checkpoint.pt")
+            if not os.path.exists(checkpoint_file):
+                logger.error(f"No checkpoint file found at {checkpoint_file}, can't save state")
+            else:
+                logger.info(f"Saving latest checkpoint to wandb")
+                wandb.save('latest-checkpoint.pt', policy="now")
+
+                if not os.path.exists('tmp'):
+                    os.mkdir('tmp')
+                with open(f"tmp/{wandb.run.id}.runfile", "w+") as f:
+                    logger.info(f"Saving current epoch number to tmp/{wandb.run.id}.runfile")
+                    f.write(str(max(self.num_epochs, 0)))
+
+        logger.info("Calling exit code 124 to trigger a rerun")
+        exit(124)
 
     def __call__(self) -> None: 
         """ 
@@ -78,165 +198,142 @@ class PhoneTransformer(object):
 
         log_interval = self.config.getint('LOGGING', 'log_interval', fallback=200)
 
-        # TODO: Replace all file output with Weights and Biases
-        exp_dir = self.config.get('EXPERIMENT', 'directory', fallback="")
-        logging.info(f'Saving output and log file to {exp_dir}')
-
-        model_path = os.path.join(exp_dir, 'model.pt')
-        training_stats_path = os.path.join(exp_dir, 'training_stats.txt')
+        # metric for logging training data
+        if self.use_wandb:
+            wandb.define_metric("train.loss", step_metric="num_epochs", summary='min')
+            wandb.define_metric("valid.loss", step_metric="num_epochs", summary='min')
 
         ###############################################################################
-        # Load data
+        # Batch data
         ###############################################################################
-
-        data_dir = self.config.get('DATASET', 'root_path', fallback="")
-        sequence_length = self.config.getint('TRAINING', 'sequence_length')
-        if not data_dir:
-            logger.exception('No training data specified.')
-            raise Exception('No training data specified')
-
-        fn = 'corpus.{}.data'.format(hashlib.md5(data_dir.encode()).hexdigest())
-        if os.path.exists(fn):
-            logging.info('Loading cached dataset...')
-            corpus = torch.load(fn)
-        else:
-            logging.info('Producing dataset...')
-            corpus = data.Corpus(data_dir, sequence_length, False)
-            torch.save(corpus, fn)
 
         batch_size = self.config.getint('TRAINING', 'batch_size')
         logging.info(f'Using batch_size = {batch_size}')
         eval_batch_size = batch_size
         test_batch_size = 1
-        train_data = data.BatchedData(corpus.train, batch_size, sequence_length, self.base_device, is_train=True)
-        val_data = data.BatchedData(corpus.valid, eval_batch_size, sequence_length, self.base_device, is_train=False)
-        test_data = data.BatchedData(corpus.test, test_batch_size, sequence_length, self.base_device, is_train=False)
-
-        ###############################################################################
-        # Build the model
-        ###############################################################################
-
-        logging.info('Building model...')
-        vocab_size = len(corpus.dictionary)
-        hidden_size = self.config.getint('MODEL', 'hidden_size', fallback=64)
-        n_layers = self.config.getint('MODEL', 'n_layers', fallback=16)
-        dropout = self.config.getfloat('MODEL', 'dropout', fallback=0.1)
-        tied = self.config.getboolean('MODEL', 'tied', fallback=False)
-        model = next_char_transformer(vocab_size, hidden_size=hidden_size, n_layers=n_layers,
-                                    dropout=dropout, tied=tied, max_sequence_len=sequence_length,
-                                    intermediate_losses=True).to(self.base_device)
-        num_params = 0
-        for p in model.parameters():
-            num_params += p.numel()
-        logging.info('Number of parameters: {}'.format(num_params))
+        train_data = data.BatchedData(self.corpus.train, batch_size, self.sequence_length, self.base_device, is_train=True)
+        val_data = data.BatchedData(self.corpus.valid, eval_batch_size, self.sequence_length, self.base_device, is_train=False)
+        test_data = data.BatchedData(self.corpus.test, test_batch_size, self.sequence_length, self.base_device, is_train=False)
 
         ###############################################################################
         # Training code
         ###############################################################################
 
-        def evaluate(data_source):
+        best_val_loss = None
+        epochs = self.config.getint('TRAINING', 'epochs', fallback=2)
+
+        def evaluate(data_source, step=1):
             # Turn on evaluation mode which disables dropout.
             total_loss = AverageMeter()
-            model.eval()
-            ntokens = len(corpus.dictionary)
-            step = 1
+            self.model.eval()
             with torch.no_grad():
-                # Original code slid a window along of size 1, rather than per-utterance
-                #for batch, i in enumerate(range(0, data_source.size(0) - 1 - args.bptt, step)):
-                for batch, i in enumerate(range(0, data_source.data.size(0) - 1, sequence_length)):
+                # Original code slid a window along of size `step`, rather than per-utterance
+                for batch, i in enumerate(range(0, data_source.data.size(0) - 1 - self.sequence_length, step)):
+                #for batch, i in enumerate(range(0, data_source.data.size(0) - 1, sequence_length)):
                     data, target, data_mask, target_mask = data_source.get_batch(i)
-                    output = model(data, target_mask)
-                    _, last_loss = model.criterion(output, target)
+                    output = self.model(data, target_mask)
+                    _, last_loss = self.model.criterion(output, target)
                     total_loss.update(last_loss.item(), data.size(0))
             return total_loss.avg
 
         def train():
             # Turn on training mode which enables dropout.
-            model.train()
+            self.model.train()
+            current_loss = AverageMeter()
             total_loss = AverageMeter()
             start_time = time.time()
-            ntokens = len(corpus.dictionary)
-            for batch, i in enumerate(range(0, train_data.data.size(0) - 1, sequence_length)):
+            for batch, i in enumerate(range(0, train_data.data.size(0) - 1, self.sequence_length)):
                 data, target, data_mask, target_mask = train_data.get_batch(i)
-                model.zero_grad()
-                output = model(data, target_mask)
-                loss, last_loss = model.criterion(output, target)
+                self.model.zero_grad()
+                output = self.model(data, target_mask)
+                loss, last_loss = self.model.criterion(output, target)
                 loss.backward()
-                optimizer.step()
+                self.optimizer.step()
 
+                current_loss.update(last_loss.item(), data.size(0))
                 total_loss.update(last_loss.item(), data.size(0))
 
                 if batch % log_interval == 0 and batch > 0:
-                    cur_loss = total_loss.avg
+                    avg_loss = current_loss.avg
                     elapsed = time.time() - start_time
                     logging.info('| epoch {:3d} | {:5d}/{:5d} batches | ms/batch {:5.2f} | '
                         'loss {:5.2f} | ppl {:8.2f} | bpc {:8.3f}'.format(
-                        epoch, batch, len(train_data.data) // sequence_length,
-                        elapsed * 1000 / log_interval, cur_loss,
-                        math.exp(cur_loss), cur_loss / math.log(2)))
-                    total_loss.reset()
+                        epoch, batch, len(train_data.data) // self.sequence_length,
+                        elapsed * 1000 / log_interval, avg_loss,
+                        math.exp(avg_loss), avg_loss / math.log(2)))
+                    current_loss.reset()
                     start_time = time.time()
 
-                if batch % 10000 == 0 and batch > 0:
-                    break
-
             return total_loss.avg
-
-        # Loop over epochs.
-        best_val_loss = None
-        lr = self.config.getfloat('TRAINING', 'lr', fallback=0.003)
-        momentum = self.config.getfloat('TRAINING', 'momentum', fallback=0.99)
-        optimizer = optim.SGD(model.parameters(), lr, momentum)
-        epochs = self.config.getint('TRAINING', 'epochs', fallback=2)
 
         ###############################################################################
         # Training loop
         ###############################################################################
 
-        try:
-            stats = TrainingStats()
-            for epoch in range(1, epochs + 1):
-                epoch_start_time = time.time()
-                train_loss = train()
-                stats.training_losses.append(train_loss)
-                logging.info('| end of epoch {:3d} | time: {:5.2f}s | train loss {:5.2f} | '
-                    'train ppl {:8.2f} | train bpc {:8.3f}'.format(epoch, (time.time() - epoch_start_time),
-                                                train_loss, math.exp(train_loss), train_loss / math.log(2)))
-                val_loss = evaluate(val_data)
-                stats.validation_losses.append(val_loss)
-                logging.info('-' * 89)
-                logging.info('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '
-                    'valid ppl {:8.2f} | valid bpc {:8.3f}'.format(epoch, (time.time() - epoch_start_time),
-                                                val_loss, math.exp(val_loss), val_loss / math.log(2)))
-                logging.info('-' * 89)
-                # Save the model if the validation loss is the best we've seen so far.
-                if not best_val_loss or val_loss < best_val_loss:
-                    with open(model_path, 'wb') as f:
-                        torch.save(model, f)
-                    best_val_loss = val_loss
-                    stats.best_validation_epoch = epoch
-                model.update(epoch // epochs)
+        for epoch in range(self.num_epochs, epochs + 1):
+            epoch_start_time = time.time()
+            self.num_epochs = epoch
+            train_loss = train()
 
-        except KeyboardInterrupt:
+            # Logging training results
+            logging.info('| end of epoch {:3d} | time: {:5.2f}s | train loss {:5.2f} | '
+                'train ppl {:8.2f} | train bpc {:8.3f}'.format(epoch, (time.time() - epoch_start_time),
+                                            train_loss, math.exp(train_loss), train_loss / math.log(2)))
+
+            val_loss = evaluate(val_data, step=self.sequence_length//4)
+
+            # Logging validation results
             logging.info('-' * 89)
-            logging.info('Exiting from training early')
+            logging.info('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '
+                'valid ppl {:8.2f} | valid bpc {:8.3f}'.format(epoch, (time.time() - epoch_start_time),
+                                            val_loss, math.exp(val_loss), val_loss / math.log(2)))
+            logging.info('-' * 89)
+            wandb.log({"train.loss": train_loss, "valid.loss": val_loss, "num_epochs": epoch},)
+            
+            # Save the model if the validation loss is the best we've seen so far.
+            if not best_val_loss or val_loss < best_val_loss:
+                best_val_loss = val_loss
+                if self.config.getboolean('EXPERIMENT', 'save_best_model', fallback=True):
+                    logger.info("New best model found - saving checkpoint")
+                    self.save_checkpoint("best.pt")
+                else:
+                    logger.info("Didn't save best model seen so far - save_best_model set to False")
+
+            # Let the model know how far through training we are for intermediate layer losses
+            self.model.update(epoch // epochs)
+
+            # Save a checkpoint
+            if self.config.getboolean('EXPERIMENT', 'save_latest_checkpoint', fallback=True):
+                logger.info("Saving a checkpoint at the end of the epoch")
+                self.save_checkpoint("latest-checkpoint.pt")
+            else:
+                logger.error("Failed to save checkpoint - save_latest_checkpoint set to False")
+
 
         ###############################################################################
         # Final cleanup
         ###############################################################################
 
-        # Save training stats
-        stats.save(training_stats_path)
-        logging.info(f'Saved training stats to {training_stats_path}')
+        logger.info("Finished training model")
 
         # Load the best saved model.
-        with open(model_path, 'rb') as f:
-            logging.info(f'Loading best model from {model_path}')
-            model = torch.load(f)
+        if not self.use_wandb:
+            logger.warning("Could not load in best model found, use_wandb is set to False")
+        else:
+            best_file = os.path.join(wandb.run.dir, f"best.pt")
+            logger.info(f"Loading in best model seen so far from {best_file}")
+            checkpoint = torch.load(best_file)
+            self.model.load_state_dict(checkpoint['learner_state_dict'], strict=False)
 
         # Run on test data.
         test_loss = evaluate(test_data)
         logging.info('=' * 89)
-        logging.info('| End of training | test loss {:5.2f} | test ppl {:8.2f}'.format(
-            test_loss, math.exp(test_loss)))
+        logging.info('| End of training | test loss {:5.2f} | test ppl {:8.2f} | test bpc {:8.3f}'.format(
+            test_loss, math.exp(test_loss), test_loss / math.log(2)))
         logging.info('=' * 89)
+
+        if self.config.getboolean('EXPERIMENT', 'save_final_model', fallback=True):
+            logger.info("Saving final model")
+            self.save_checkpoint("final.pt")
+        else:
+            logger.info("Could not save final model - save_final_model set to False")

@@ -3,6 +3,8 @@ __author__ = 'Zeb Goriely'
 
 import argparse
 import random
+import os
+import signal
 
 from src.utils import setup
 from src.phone_transformer import PhoneTransformer
@@ -22,14 +24,30 @@ def main():
     else: 
         run_id = args.run_id
 
+    # Possibly reading in a runfile (only exists if we are resuming training)
+    run_file_path = f"tmp/{run_id}.runfile"
+    if os.path.exists(run_file_path): 
+        # we must be resuming a run - reading in relevant information
+        with open(run_file_path, "r") as f: 
+            resume_num_epochs = int(f.readline())
+    else: 
+        resume_num_epochs = 0 
+
     # Setting up logging, config read in and seed setting
-    config = setup(args.Path, run_id)
+    config = setup(args.Path, run_id, resume_num_epochs)
     
     # Initializing problyglot with configuration and options
-    phonetransformer = PhoneTransformer(config)
+    phonetransformer = PhoneTransformer(config, resume_num_epochs)
+
+    # setting up timeout handler - called if the program receives a SIGINT either from the user
+    # or from SLURM if it is about to timeout
+    signal.signal(signal.SIGINT, phonetransformer.timeout_handler)
 
     # launching training or eval script
     phonetransformer()
+
+    if os.path.exists(run_file_path):
+        os.remove(run_file_path)
 
 if __name__ == '__main__':
     main()

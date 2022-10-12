@@ -31,63 +31,105 @@ class Dictionary(object):
 
 
 class Corpus(object):
-    """ Stores a corpus, split according to train-valid-test. Sequences have a maximum length
-    and are stored as IDs rather than word tokens.
+    """ Pre-processes and stores a corpus of train, test and validation data. 
+
+    Given a path, expects to find a "train.txt", "valid.txt" and "test.txt" file at that path. 
+    For each file, tokenises each line in that file, truncating it if it exceeds the maximum
+    utterance length and padding it otherwise. Each split of the data is stored as a single
+    long tensor of token IDs.
+
+    Expects space-delimited characters, but can also tokenize raw text if `raw_text` is true. In
+    this case, lines are not truncated.
     """
 
-    def __init__(self, path, max_utterance_length=64, truncate_long_utterances=False):
+    def __init__(self, path, max_utterance_length=64, truncate_long_utterances=False, raw_text=False):
         self.max_utterance_length = max_utterance_length
         self.truncate_long_utterances = truncate_long_utterances
+        self.raw_text = raw_text
 
         self.dictionary = Dictionary()
-        self.dictionary.add_word('<pad>')
-        self.dictionary.add_word('<ub>')
-        assert PAD == self.dictionary.word2idx["<pad>"]
+        if not raw_text:
+            self.dictionary.add_word('<pad>')
+            self.dictionary.add_word('<ub>')
+            assert PAD == self.dictionary.word2idx["<pad>"]
 
         self.train = self.tokenize(os.path.join(path, 'train.txt'))
         self.valid = self.tokenize(os.path.join(path, 'valid.txt'))
         self.test = self.tokenize(os.path.join(path, 'test.txt'))
 
-    def tokenize_line(self, line):
-        """Splits, pads and adds EOS to a line. Returns tokenized line and whether line was truncated."""
-        words = line.split()
-        truncated = False
-        if len(words) + 2 > self.max_utterance_length:
-            truncated = True
-            words = words[:self.max_utterance_length - 2]
-        pad_length = self.max_utterance_length - len(words) - 2
-        words = ['<ub>'] + words + ['<ub>'] + ['<pad>'] * pad_length
-        assert (len(words) == self.max_utterance_length)
+    def tokenize_raw(self, path):
+        """Tokenizes a raw text file, converting all characters to IDs.
+        Performs no padding and adds no EOS tokens.
+        """
+        if not os.path.exists(path):
+            logger.exception(f'No text file found at {path}')
+            raise Exception(f'No text file found at {path}')
+
+        # Add tokens to the dictionary
+        with open(path, 'r') as f:
+            lines = f.readlines()
+            tensor_length = sum([len(line) for line in lines])
+            logging.info(f'Found {tensor_length} characters in {path}')
+            token_id = 0
+            ids = torch.LongTensor(tensor_length)
+            for line in lines:
+                for token in line:
+                    self.dictionary.add_word(token)
+                    ids[token_id] = self.dictionary.word2idx[token]
+                    token_id += 1
+            
+            assert token_id == tensor_length
+
+        logging.info(f'Saved {tensor_length} characters')
+
+        return ids
         
-        return words, truncated
 
-    def tokenize(self, path):
-        """Tokenizes a text file."""
-        assert os.path.exists(path)
-        # Add words to the dictionary
+    def tokenize_line(self, line):
+        """Splits, pads and adds EOS to a line. Returns tokenized line and whether line was truncated.
+        Expects a space-delimited line, such as "h e l l o".
+        """
+        tokens = line.split()
+        truncated = False
+        if len(tokens) + 2 > self.max_utterance_length:
+            truncated = True
+            tokens = tokens[:self.max_utterance_length - 2]
+        pad_length = self.max_utterance_length - len(tokens) - 2
+        tokens = ['<ub>'] + tokens + ['<ub>'] + ['<pad>'] * pad_length
+        assert (len(tokens) == self.max_utterance_length)
+        
+        return tokens, truncated
 
+    def tokenize_delimited(self, path):
+        """Tokenizes a space delimited text file. Returns a single tensor containing all tokens as IDs. """
+        if not os.path.exists(path):
+            logger.exception(f'No text file found at {path}')
+            raise Exception(f'No text file found at {path}')
+        
+        # Add tokens to the dictionary
         with open(path, 'r') as f:
             lines = f.readlines()
             tokenized_lines = []
             long_utterances = 0
             for line in lines:
-                words, truncated = self.tokenize_line(line)
+                tokens, truncated = self.tokenize_line(line)
                 if truncated:
                     long_utterances += 1
                     if not self.truncate_long_utterances:
                         continue
-                tokenized_lines.append(words)
-                for word in words:
-                    self.dictionary.add_word(word)
+                tokenized_lines.append(tokens)
+                for token in tokens:
+                    self.dictionary.add_word(token)
             
-            ids = torch.LongTensor(len(tokenized_lines) * self.max_utterance_length)
-            token = 0
-            for words in tokenized_lines:
-                for word in words:
-                    ids[token] = self.dictionary.word2idx[word]
+            tensor_length = len(tokenized_lines) * self.max_utterance_length
+            ids = torch.LongTensor(tensor_length)
+            token_id = 0
+            for line in tokenized_lines:
+                for token in line:
+                    ids[token_id] = self.dictionary.word2idx[token]
                     token += 1
             
-            assert token == len(tokenized_lines) * self.max_utterance_length
+            assert token_id == len(tokenized_lines) * self.max_utterance_length
         
         logging.info(f'Found {len(lines)} utterances in {path}')
         if long_utterances > 0:
@@ -98,6 +140,13 @@ class Corpus(object):
         logging.info(f'Saved {len(tokenized_lines)} utterances')
 
         return ids
+
+    def tokenize(self, path):
+        """ Either tokenizes a space delimited file or a raw text file"""
+        if self.raw_text:
+            return self.tokenize_raw(path)
+        else:
+            return self.tokenize_delimited(path)
 
 # mask subsequent entries
 def subsequent_mask(size):
