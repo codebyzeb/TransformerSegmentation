@@ -63,13 +63,8 @@ class MultiLayerCrossEntropy(nn.Module):
         n_layers_with_loss = 0
         for layer_output in layer_outputs:
             if layer_output is not None:
-                # if True:
-                if self.training:
-                    loss = self.cross_entropy(layer_output.view(-1, self.vocab_size).contiguous(), target)
-                else:
-                    # in evaluation consider only the last prediction
-                    # loss = self.cross_entropy(layer_output[:, -1, :].contiguous(), target)
-                    loss = self.cross_entropy(layer_output.view(-1, self.vocab_size).contiguous(), target)
+                # For both evaluation and training, we take the loss across the whole predicted sequence
+                loss = self.cross_entropy(layer_output.view(-1, self.vocab_size).contiguous(), target)
                 total_loss += loss
                 n_layers_with_loss += 1
 

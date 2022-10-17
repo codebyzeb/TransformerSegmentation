@@ -203,15 +203,14 @@ class BatchedData():
 
     def get_batch(self, i):
         if self.is_train:
-            #i = torch.randint(low=0, high=(len(source) - args.bptt), size=(1,)).long().item()
+            # Choose a random sequence in the data if we're training, otherwise use given batch number
             i = torch.randint(low=0, high=(len(self.data) // self.sequence_length), size=(1,)).long().item() * self.sequence_length
-        #else:
-            # seq_len = min(args.bptt, len(source) - 1 - i)
-            # target = source[i + seq_len, :]
-            # target = source[i + 1:i + 1 + seq_len].t()
-
+        
+        # Make sure we don't spill over the edge of the data
         seq_len = min(self.sequence_length, len(self.data) - 1 - i)
+        # Target is sequence shifted by 1. Ensure last token is pad.
         target = self.data[i + 1:i + 1 + seq_len].t()
+        target[-1] = PAD
         data = self.data[i:i + seq_len].t()
 
         data_mask = (data != PAD).unsqueeze(-2)
