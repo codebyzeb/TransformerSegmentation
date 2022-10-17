@@ -49,9 +49,10 @@ class Corpus(object):
 
         self.dictionary = Dictionary()
         if not raw_text:
-            self.dictionary.add_word('<pad>')
-            self.dictionary.add_word('<ub>')
-            assert PAD == self.dictionary.word2idx["<pad>"]
+            self.dictionary.add_word('<PAD>')
+            self.dictionary.add_word('<START>')
+            self.dictionary.add_word('<END>')
+            assert PAD == self.dictionary.word2idx["<PAD>"]
 
         self.train = self.tokenize(os.path.join(path, 'train.txt'))
         self.valid = self.tokenize(os.path.join(path, 'valid.txt'))
@@ -86,7 +87,7 @@ class Corpus(object):
         
 
     def tokenize_line(self, line):
-        """Splits, pads and adds EOS to a line. Returns tokenized line and whether line was truncated.
+        """ Splits, pads and adds EOS to a line. Returns tokenized line and whether line was truncated.
         Expects a space-delimited line, such as "h e l l o".
         """
         tokens = line.split()
@@ -95,7 +96,7 @@ class Corpus(object):
             truncated = True
             tokens = tokens[:self.max_utterance_length - 2]
         pad_length = self.max_utterance_length - len(tokens) - 2
-        tokens = ['<ub>'] + tokens + ['<ub>'] + ['<pad>'] * pad_length
+        tokens = ['<START>'] + tokens + ['<END>'] + ['<PAD>'] * pad_length
         assert (len(tokens) == self.max_utterance_length)
         
         return tokens, truncated
@@ -150,14 +151,14 @@ class Corpus(object):
 
 # mask subsequent entries
 def subsequent_mask(size):
-    """Mask out subsequent positions."""
+    """ Mask out subsequent positions. """
     attn_shape = (1, size, size)
     subsequent_mask = np.triu(np.ones(attn_shape), k=1).astype('uint8')
     return torch.from_numpy(subsequent_mask) == 0
 
 
 def make_std_mask(tgt):
-    """Create a mask to hide padding and future words."""
+    """ Create a mask to hide padding and future words. """
     tgt_mask = (tgt != PAD).unsqueeze(-2)
     tgt_mask = tgt_mask & subsequent_mask(tgt.size(-1)).type_as(tgt_mask)
     return tgt_mask
@@ -203,17 +204,17 @@ class BatchedData():
 
     def get_batch(self, i):
         if self.is_train:
-            #i = torch.randint(low=0, high=(len(source) - args.bptt), size=(1,)).long().item()
+            # Choose a random sequence in the data if we're training, otherwise use given batch number
             i = torch.randint(low=0, high=(len(self.data) // self.sequence_length), size=(1,)).long().item() * self.sequence_length
-        #else:
-            # seq_len = min(args.bptt, len(source) - 1 - i)
-            # target = source[i + seq_len, :]
-            # target = source[i + 1:i + 1 + seq_len].t()
-
+        
+        # Make sure we don't spill over the edge of the data
         seq_len = min(self.sequence_length, len(self.data) - 1 - i)
-        target = self.data[i + 1:i + 1 + seq_len].t()
         data = self.data[i:i + seq_len].t()
+        # Target is sequence shifted by 1. Ensure last token is pad.
+        target = self.data[i + 1:i + 1 + seq_len].t()
+        target[-1] = PAD
 
+        # Mask out pad token
         data_mask = (data != PAD).unsqueeze(-2)
         target_mask = make_std_mask(data.long())
 
