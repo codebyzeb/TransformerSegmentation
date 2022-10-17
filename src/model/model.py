@@ -64,8 +64,7 @@ class MultiLayerCrossEntropy(nn.Module):
         for layer_output in layer_outputs:
             if layer_output is not None:
                 # For both evaluation and training, we take the loss across the whole predicted sequence
-                # Also make sure we don't evaluate on the padding token
-                loss = self.cross_entropy(layer_output.view(-1, self.vocab_size).contiguous(), target, ignore_index=0)
+                loss = self.cross_entropy(layer_output.view(-1, self.vocab_size).contiguous(), target)
                 total_loss += loss
                 n_layers_with_loss += 1
 
@@ -95,7 +94,8 @@ class NextCharTransformer(nn.Module):
                                n_layers, intermediate_layer_predictions)
         self.embed = Embeddings(hidden_size, vocab_size)
 
-        self.criterion = MultiLayerCrossEntropy(vocab_size)
+        # We don't evaluate on the padding token
+        self.criterion = MultiLayerCrossEntropy(vocab_size, ignore_index=0)
 
         # use weight sharing
         if tied:

@@ -110,7 +110,7 @@ class PhoneTransformer(object):
             if "text8" in data_dir:
                 corpus = data.Corpus(data_dir, self.sequence_length, truncate_long_utterances=False, raw_text=True)
             else:
-                corpus = data.Corpus(data_dir, self.sequence_length, truncate_long_utterances=False, raw_test=False)
+                corpus = data.Corpus(data_dir, self.sequence_length, truncate_long_utterances=False, raw_text=False)
             torch.save(corpus, fn)
         return corpus
 
@@ -228,8 +228,8 @@ class PhoneTransformer(object):
                 for batch, i in enumerate(range(0, data_source.data.size(0) - 1 - self.sequence_length, step)):
                     data, target, data_mask, target_mask = data_source.get_batch(i)
                     output = self.model(data, target_mask)
-                    _, last_loss = self.model.criterion(output, target)
-                    total_loss.update(last_loss.item(), data.size(0))
+                    _, final_layer_loss = self.model.criterion(output, target)
+                    total_loss.update(final_layer_loss.item(), data.size(0))
             return total_loss.avg
 
         def train():
@@ -242,12 +242,12 @@ class PhoneTransformer(object):
                 data, target, data_mask, target_mask = train_data.get_batch(i)
                 self.model.zero_grad()
                 output = self.model(data, target_mask)
-                loss, last_loss = self.model.criterion(output, target)
-                loss.backward()
+                average_loss_of_all_layers, final_layer_loss = self.model.criterion(output, target)
+                average_loss_of_all_layers.backward()
                 self.optimizer.step()
 
-                current_loss.update(last_loss.item(), data.size(0))
-                total_loss.update(last_loss.item(), data.size(0))
+                current_loss.update(final_layer_loss.item(), data.size(0))
+                total_loss.update(final_layer_loss.item(), data.size(0))
 
                 if batch % log_interval == 0 and batch > 0:
                     avg_loss = current_loss.avg

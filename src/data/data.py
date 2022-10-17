@@ -128,7 +128,7 @@ class Corpus(object):
             for line in tokenized_lines:
                 for token in line:
                     ids[token_id] = self.dictionary.word2idx[token]
-                    token += 1
+                    token_id += 1
             
             assert token_id == len(tokenized_lines) * self.max_utterance_length
         
@@ -182,12 +182,13 @@ class BatchedData():
         self.sequence_length = sequence_length
         self.base_device = base_device
         self.is_train = is_train
+        self.batch_size = batch_size
 
         # Work out how cleanly we can divide the dataset into batch_size parts.
         # Also ensure that each batch starts at the start of an utterance
-        nbatch = data.size(0) // (batch_size * self.sequence_length)
+        num_batches = data.size(0) // (batch_size * self.sequence_length)
         # Trim off any extra elements that wouldn't cleanly fit (remainders).
-        data = data.narrow(0, 0, nbatch * batch_size * self.sequence_length)
+        data = data.narrow(0, 0, num_batches * batch_size * self.sequence_length)
         # Evenly divide the data across the batch_size batches.
         data = data.view(batch_size, -1).t().contiguous()
         self.data = data.to(self.base_device)
@@ -210,9 +211,10 @@ class BatchedData():
         # Make sure we don't spill over the edge of the data
         seq_len = min(self.sequence_length, len(self.data) - 1 - i)
         data = self.data[i:i + seq_len].t()
-        # Target is sequence shifted by 1. Ensure last token is pad.
+        # Target is sequence shifted by 1.
         target = self.data[i + 1:i + 1 + seq_len].t()
-        target[-1] = PAD
+        # Ensure last token is pad
+        target[:,-1] = torch.zeros(self.batch_size)
 
         # Mask out pad token
         data_mask = (data != PAD).unsqueeze(-2)
