@@ -2,7 +2,6 @@ __author__ = 'Zeb Goriely'
 """ Wrapper class for training and evaluating a phoneme transformer model """
 
 import typing
-import torch
 import logging 
 import time 
 import os
