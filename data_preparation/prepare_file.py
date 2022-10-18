@@ -6,6 +6,8 @@ If given a directory, processes all files in the directory, creating a 'gold' an
 
 E.g. `python prepare_file.py EnglishNA.txt` creates a EnglishNA_prepared.txt and a EnglishNA_gold.txt file.
 
+# TODO: Generally improve this script, more logging, documentation etc.
+
 """
 
 import json, sys, os
@@ -19,6 +21,7 @@ if os.path.isfile(sys.argv[1]):
     in_file = Path(sys.argv[1])
 
     text = in_file.read_text()
+    print(text[0])
 
     # compute some statistics on the input text (text tokenized at phone
     # and word levels)
@@ -29,6 +32,7 @@ if os.path.isfile(sys.argv[1]):
         json.dumps(stats, indent=4) + '\n')
 
     # prepare the input for segmentation
+    text = [line for line in text.splitlines() if not '(' in line]
     prepared = '\n'.join(list(prepare(text)))
     Path(f'{in_file.stem}_prepared.txt').write_text(prepared)
 
@@ -45,10 +49,10 @@ if os.path.isdir(sys.argv[1]):
     prepared_dir.mkdir(exist_ok=True)
 
     for file in files:
-        text = file.read_text().split('\n')
+        print(f'Preparing file "{file}"')
+        # Remove brackets
+        text = [line for line in file.read_text().splitlines() if not '(' in line]
         prepared_text = '\n'.join(list(prepare(text)))
         (prepared_dir / file.name).write_text(prepared_text)
         gold_text = '\n'.join(list(gold(text)))
         (gold_dir / file.name).write_text(gold_text)
-
-        print(f'Prepared file "{file}"')
