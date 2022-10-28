@@ -18,7 +18,10 @@ import torch.onnx
 
 from .data import data
 from .model.model import next_char_transformer
-from .utils import DEVICE as DEFAULT_DEVICE, num_gpus
+
+
+DEFAULT_DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+num_gpus = torch.cuda.device_count()
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
@@ -43,60 +46,57 @@ class PhoneTransformer(object):
     the next char transformer.
     """
     
-    def __init__(self, config, resume_num_epochs=0):
-        """ Initialize base model based on a config 
-        """
+    def __init__(self):
+        """ Initialize base model based using wandb config """
 
-        # config params need to be accessed by several methods
-        self.config = config
+        self.setup_seed()
 
-        # whether to log out information to w&b
-        self.use_wandb = config.getboolean('EXPERIMENT', 'use_wandb', fallback=True)
-
-        self.base_device = config.get('TRAINING', 'device', fallback=DEFAULT_DEVICE)
+        self.base_device = wandb.config['TRAINING'].setdefault('device', DEFAULT_DEVICE)
         logging.info(f'Running phone transformer on device: {self.base_device}')
 
-        # setting num_epochs before learner, to inform model if we are resuming training 
-        # or starting fresh 
-        self.num_epochs = resume_num_epochs if resume_num_epochs else 0
+        # Using the number of log steps from wandb as number of epochs. If not resuming, will be 0
+        self.num_epochs = wandb.run.step
 
         # Load corpus, model and optimiser
-        self.sequence_length = self.config.getint('TRAINING', 'sequence_length')
+        self.sequence_length = wandb.config['TRAINING'].get('sequence_length')
         self.corpus = self.load_corpus()
         self.model = self.load_model()
         self.optimizer = self.load_optimizer()
 
-        # NOTE: possibly load in learner checkpoint
         # if num_epochs is 0 at the start of training, then we are resuming training 
         if self.num_epochs > 0:
             checkpoint_file = "latest-checkpoint.pt"
-            checkpoint_run = None
         else:
-            checkpoint_file = self.config.get("EXPERIMENT", "checkpoint_file", fallback="")
-            checkpoint_run = self.config.get("EXPERIMENT", "checkpoint_run", fallback="")
+            checkpoint_file = wandb.config['EXPERIMENT'].setdefault('checkpoint_file', '')
 
         if checkpoint_file:
-            if not self.use_wandb:
-                logging.warning("Could not load in checkpoint file, use_wandb is set to False")
-            else:
-                logging.info(f"Loading in checkpoint file: {checkpoint_file}")
-                wandb_checkpoint = wandb.restore(checkpoint_file, run_path=checkpoint_run)
-                checkpoint = torch.load(wandb_checkpoint.name)
-                self.model.load_state_dict(checkpoint['learner_state_dict'], strict=False)
-                self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-                os.rename(os.path.join(wandb.run.dir, checkpoint_file),
-                          os.path.join(wandb.run.dir, "loaded_checkpoint.pt"))
+            logging.info(f'Loading in checkpoint file: {checkpoint_file}')
+            checkpoint = torch.load(wandb.restore(checkpoint_file).name)
+            self.model.load_state_dict(checkpoint['learner_state_dict'], strict=False)
+            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            os.rename(os.path.join(wandb.run.dir, checkpoint_file),
+                os.path.join(wandb.run.dir, "loaded_checkpoint.pt"))
         else:
-            logging.info("No checkpoint used - learning from scratch")
+            logging.info('No checkpoint used - learning from scratch')
+            self.num_epochs = 0
 
-        if self.use_wandb:
-            # setting up metrics for logging to wandb
-            # counter tracks number of batches of tasks seen by metalearner
-            wandb.define_metric("num_epochs")
+    def setup_seed(self):
+        """ Set up the seed """
+        seed = wandb.config.EXPERIMENT.setdefault('seed',-1)
+        if seed < 0: 
+            logging.info('Skipping seed setting for reproducibility')
+            logging.info('If you would like to set a seed, set seed to a positive value in config')
+            return
+        logging.info(f'Setting seed: {seed}')
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        if torch.cuda.is_available() > 0:
+            torch.cuda.manual_seed_all(seed)
 
     def load_corpus(self):
         """ Load corpus being used """
-        data_dir = self.config.get('DATASET', 'root_path', fallback="")
+        data_dir = wandb.config['DATASET'].setdefault('root_path', '')
         if not data_dir:
             logging.exception('No training data specified.')
             raise Exception('No training data specified')
@@ -107,7 +107,7 @@ class PhoneTransformer(object):
             corpus = torch.load(fn)
         else:
             logging.info('Producing dataset...')
-            if "text8" in data_dir:
+            if 'text8' in data_dir:
                 corpus = data.Corpus(data_dir, self.sequence_length, truncate_long_utterances=False, raw_text=True)
             else:
                 corpus = data.Corpus(data_dir, self.sequence_length, truncate_long_utterances=False, raw_text=False)
@@ -115,16 +115,15 @@ class PhoneTransformer(object):
         return corpus
 
     def load_model(self):
-        """ Either build model or load model from a checkpoint """
-        # TODO: add model loading from checkpoint
+        # TODO: Maybe just pass in the MODEL dict directly?
         logging.info('Building model...')
         vocab_size = len(self.corpus.dictionary)
-        hidden_size = self.config.getint('MODEL', 'hidden_size', fallback=64)
-        n_layers = self.config.getint('MODEL', 'n_layers', fallback=16)
-        dropout = self.config.getfloat('MODEL', 'dropout', fallback=0.1)
-        tied = self.config.getboolean('MODEL', 'tied', fallback=False)
-        inner_linear = self.config.getint('MODEL', 'inner_linear', fallback=2048)
-        sequence_length = self.config.getint('TRAINING', 'sequence_length')
+        hidden_size = wandb.config['MODEL'].setdefault('hidden_size', 64)
+        n_layers = wandb.config['MODEL'].setdefault('n_layers', 16)
+        dropout = wandb.config['MODEL'].setdefault('dropout', 0.1)
+        tied = wandb.config['MODEL'].setdefault('tied', False)
+        inner_linear = wandb.config['MODEL'].setdefault('inner_linear', 2048)
+        sequence_length = wandb.config['TRAINING'].get('sequence_length')
         
         model = next_char_transformer(vocab_size, hidden_size=hidden_size, n_layers=n_layers,
                                     dropout=dropout, tied=tied, max_sequence_len=sequence_length,
@@ -136,25 +135,20 @@ class PhoneTransformer(object):
         return model
 
     def load_optimizer(self):
-        """ Either build optimiser or load from a checkpoint """
-        # TODO: add loading optimiser from checkpoint
-        lr = self.config.getfloat('TRAINING', 'lr', fallback=0.003)
-        momentum = self.config.getfloat('TRAINING', 'momentum', fallback=0.99)
+        lr = wandb.config['TRAINING'].setdefault('lr', 0.003)
+        momentum = wandb.config['TRAINING'].setdefault('momentum', 0.99)
         optimizer = optim.SGD(self.model.parameters(), lr, momentum)
         return optimizer
 
     def save_checkpoint(self, model_name):
-        if not self.use_wandb:
-            logging.error("Cannot save model checkpoint because use_wandb set to False")
-        else:
-            model_path = os.path.join(wandb.run.dir, model_name)
-            logging.info(f"Saving model checkpoint to {model_path}")
-            checkpoint = {
-                'learner_state_dict': self.model.state_dict(),
-                'optimizer_state_dict': self.optimizer.state_dict(),
-            }
-            # save latest checkpoint
-            torch.save(checkpoint, model_path)
+        # TODO: Deal with the fact that we might be saving part-way through an epoch
+        model_path = os.path.join(wandb.run.dir, model_name)
+        logging.info(f'Saving model checkpoint to {model_path}')
+        checkpoint = {
+            'learner_state_dict': self.model.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+        }
+        torch.save(checkpoint, model_path)
 
     def timeout_handler(self, signum, frame):
         """
@@ -162,27 +156,26 @@ class PhoneTransformer(object):
         slurm just before the program is about to terminate and saves out a model checkpoint.
         """
 
-        logging.info("Timeout (SIGINT) termination signal received")
-        logging.info("Saving training state")
+        logging.info('Timeout (SIGINT) termination signal received')
+        logging.info('Saving training state')
 
-        if not self.use_wandb:
-            logging.error("Cannot save epoch number because use_wandb set to False")
+        checkpoint_file = os.path.join(wandb.run.dir, 'latest-checkpoint.pt')
+        if not os.path.exists(checkpoint_file):
+            logging.error(f'No checkpoint file found at {checkpoint_file}, can\'t save state')
         else:
-            checkpoint_file = os.path.join(wandb.run.dir, "latest-checkpoint.pt")
-            if not os.path.exists(checkpoint_file):
-                logging.error(f"No checkpoint file found at {checkpoint_file}, can't save state")
-            else:
-                logging.info(f"Saving latest checkpoint to wandb")
-                wandb.save('latest-checkpoint.pt', policy="now")
+            logging.info(f'Saving latest checkpoint to wandb')
+            wandb.save('latest-checkpoint.pt', policy='now')
 
-                if not os.path.exists('tmp'):
-                    os.mkdir('tmp')
-                with open(f"tmp/{wandb.run.id}.runfile", "w+") as f:
-                    logging.info(f"Saving current epoch number to tmp/{wandb.run.id}.runfile")
-                    f.write(str(max(self.num_epochs, 0)))
-
-        logging.info("Calling exit code 124 to trigger a rerun")
+        logging.info('Calling exit code 124 to trigger a rerun')
         exit(124)
+
+    def log_losses(self, loss, message='', last_time=None):
+        logging.info('=' * 89)
+        if last_time:
+            message = message + ' | time: {:5.2f}s'.format(time.time() - last_time)
+        logging.info('| {} | test loss {:5.2f} | test ppl {:8.2f} | test bpc {:8.3f}'.format(
+            message, loss, math.exp(loss), loss / math.log(2)))
+        logging.info('=' * 89)
 
     def __call__(self) -> None: 
         """ 
@@ -193,18 +186,18 @@ class PhoneTransformer(object):
         # Prepare experiment
         ###############################################################################
 
-        log_interval = self.config.getint('LOGGING', 'log_interval', fallback=200)
+        log_interval = wandb.config['LOGGING'].setdefault('log_interval', 200)
 
         # metric for logging training data
-        if self.use_wandb:
-            wandb.define_metric("train.loss", step_metric="num_epochs", summary='min')
-            wandb.define_metric("valid.loss", step_metric="num_epochs", summary='min')
+        # wandb.define_metric('epoch')
+        # wandb.define_metric("train.loss", step_metric='epoch', summary='min')
+        # wandb.define_metric("valid.loss", step_metric='epoch', summary='min')
 
         ###############################################################################
         # Batch data
         ###############################################################################
 
-        batch_size = self.config.getint('TRAINING', 'batch_size')
+        batch_size = wandb.config['TRAINING'].get('batch_size')
         logging.info(f'Using batch_size = {batch_size}')
         eval_batch_size = batch_size
         test_batch_size = 1
@@ -217,7 +210,7 @@ class PhoneTransformer(object):
         ###############################################################################
 
         best_val_loss = None
-        epochs = self.config.getint('TRAINING', 'epochs', fallback=2)
+        epochs = wandb.config['TRAINING'].setdefault('epochs', 2)
 
         def evaluate(data_source, step=1):
             # Turn on evaluation mode which disables dropout.
@@ -268,28 +261,20 @@ class PhoneTransformer(object):
 
         for epoch in range(self.num_epochs, epochs + 1):
             epoch_start_time = time.time()
-            self.num_epochs = epoch
             train_loss = train()
-
-            # Logging training results
-            logging.info('| end of epoch {:3d} | time: {:5.2f}s | train loss {:5.2f} | '
-                'train ppl {:8.2f} | train bpc {:8.3f}'.format(epoch, (time.time() - epoch_start_time),
-                                            train_loss, math.exp(train_loss), train_loss / math.log(2)))
+            self.log_losses(train_loss, 'end of epoch {:3d}'.format(epoch), epoch_start_time)
 
             val_loss = evaluate(val_data, step=self.sequence_length)
+            self.log_losses(val_loss, 'end of epoch {:3d}'.format(epoch), epoch_start_time)
 
-            # Logging validation results
-            logging.info('-' * 89)
-            logging.info('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '
-                'valid ppl {:8.2f} | valid bpc {:8.3f}'.format(epoch, (time.time() - epoch_start_time),
-                                            val_loss, math.exp(val_loss), val_loss / math.log(2)))
-            logging.info('-' * 89)
-            wandb.log({"train.loss": train_loss, "valid.loss": val_loss, "num_epochs": epoch},)
+            # Log to WandB. This also increases wandb.run.step by 1,
+            # which is used for setting resumed epoch number
+            wandb.log({"train" : {"loss": train_loss}, 'valid': {'loss': val_loss}})
             
             # Save the model if the validation loss is the best we've seen so far.
             if not best_val_loss or val_loss < best_val_loss:
                 best_val_loss = val_loss
-                if self.config.getboolean('EXPERIMENT', 'save_best_model', fallback=True):
+                if wandb.config['EXPERIMENT'].setdefault('save_best_model', True):
                     logging.info("New best model found - saving checkpoint")
                     self.save_checkpoint("best.pt")
                 else:
@@ -299,7 +284,7 @@ class PhoneTransformer(object):
             self.model.update(epoch // epochs)
 
             # Save a checkpoint
-            if self.config.getboolean('EXPERIMENT', 'save_latest_checkpoint', fallback=True):
+            if wandb.config['EXPERIMENT'].setdefault('save_latest_checkpoint', True):
                 logging.info("Saving a checkpoint at the end of the epoch")
                 self.save_checkpoint("latest-checkpoint.pt")
             else:
@@ -313,22 +298,19 @@ class PhoneTransformer(object):
         logging.info("Finished training model")
 
         # Load the best saved model.
-        if not self.use_wandb:
-            logging.warning("Could not load in best model found, use_wandb is set to False")
-        else:
-            best_file = os.path.join(wandb.run.dir, f"best.pt")
-            logging.info(f"Loading in best model seen so far from {best_file}")
-            checkpoint = torch.load(best_file)
-            self.model.load_state_dict(checkpoint['learner_state_dict'], strict=False)
+        best_file = os.path.join(wandb.run.dir, f"best.pt")
+        logging.info(f"Loading in best model seen so far from {best_file}")
+        checkpoint = torch.load(best_file)
+        self.model.load_state_dict(checkpoint['learner_state_dict'], strict=False)
 
         # Run on test data.
         test_loss = evaluate(test_data, step=self.sequence_length)
-        logging.info('=' * 89)
-        logging.info('| End of training | test loss {:5.2f} | test ppl {:8.2f} | test bpc {:8.3f}'.format(
-            test_loss, math.exp(test_loss), test_loss / math.log(2)))
-        logging.info('=' * 89)
 
-        if self.config.getboolean('EXPERIMENT', 'save_final_model', fallback=True):
+        # Log final loss
+        self.log_losses(test_loss, 'End of training')
+        wandb.log({'test_loss': test_loss})
+
+        if wandb.config['EXPERIMENT'].setdefault('save_final_model', True):
             logging.info("Saving final model")
             self.save_checkpoint("final.pt")
         else:
