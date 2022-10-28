@@ -5,6 +5,7 @@ import argparse
 import random
 import os
 import signal
+import shutil
 
 from src.utils import setup
 from src.phone_transformer import PhoneTransformer
@@ -31,7 +32,9 @@ def main():
         with open(run_file_path, "r") as f: 
             resume_num_epochs = int(f.readline())
     else: 
-        resume_num_epochs = 0 
+        # Beginining training - make sure config file isn't modified before training is resumed
+        shutil.copyfile(args.Path, f'tmp/{run_id}.ini')
+        resume_num_epochs = 0
 
     # Setting up logging, config read in and seed setting
     config = setup(args.Path, run_id, resume_num_epochs)

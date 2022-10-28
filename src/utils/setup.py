@@ -57,16 +57,27 @@ def setup_wandb(config, run_id, resume_training):
     """
     if config.getboolean('EXPERIMENT', 'use_wandb', fallback=True):
         dict_config = json.loads(json.dumps(config._sections))
-        wandb.init(project=config.get("EXPERIMENT", "name"),
-                   entity="zeb",
+        wandb.init(project=config.get('EXPERIMENT', 'name'),
+                   entity='zeb',
                    config=dict_config,
                    id=run_id,
-                   resume="must" if resume_training else None
+                   resume='must' if resume_training else None
                    )
         if resume_training:
-            logging.info(f"Resuming run with id: {run_id}")
+            logging.info(f'Resuming run with id: {run_id}')
         else: 
-            logging.info(f"Starting run with id: {run_id}")
+            logging.info(f'Starting run with id: {run_id}')
+
+    logging.info('Using the following configuration:')
+    defaults = config.defaults()
+    if defaults:
+        logging.info('DEFAULTS')
+        for key, value in defaults:
+            logging.info(f'   {key} : {value}')
+    for section in config.sections():
+        logging.info(section)
+        for key, value in config.items(section):
+            logging.info(f'   {key} : {value}')
 
 def setup(config_file_path, run_id, resume_num_epochs):
     """ Reads in config file, sets up logger and sets a seed to ensure reproducibility. """

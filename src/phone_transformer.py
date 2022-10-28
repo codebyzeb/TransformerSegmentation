@@ -276,7 +276,7 @@ class PhoneTransformer(object):
                 'train ppl {:8.2f} | train bpc {:8.3f}'.format(epoch, (time.time() - epoch_start_time),
                                             train_loss, math.exp(train_loss), train_loss / math.log(2)))
 
-            val_loss = evaluate(val_data, step=self.sequence_length//4)
+            val_loss = evaluate(val_data, step=self.sequence_length)
 
             # Logging validation results
             logging.info('-' * 89)
@@ -322,7 +322,7 @@ class PhoneTransformer(object):
             self.model.load_state_dict(checkpoint['learner_state_dict'], strict=False)
 
         # Run on test data.
-        test_loss = evaluate(test_data)
+        test_loss = evaluate(test_data, step=self.sequence_length)
         logging.info('=' * 89)
         logging.info('| End of training | test loss {:5.2f} | test ppl {:8.2f} | test bpc {:8.3f}'.format(
             test_loss, math.exp(test_loss), test_loss / math.log(2)))
