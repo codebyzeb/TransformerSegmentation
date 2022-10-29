@@ -1,6 +1,6 @@
 #!/bin/bash
 #!
-#! Example SLURM job script for Wilkes3 (AMD EPYC 7763, ConnectX-6, A100)
+#! SLURM script to start a run as part of a parameter sweep
 #! Last updated: Fri 30 Jul 11:07:58 BST 2021
 #!
 
@@ -10,7 +10,7 @@
 
 #! sbatch directives begin here ###############################
 #! Name of the job:
-#SBATCH -J zeb-phone-transform
+#SBATCH -J zeb-sweep
 #! Which project should be charged (NB Wilkes2 projects end in '-GPU'):
 #SBATCH -A BUTTERY-SL3-GPU
 #! How many whole nodes should be allocated?
@@ -22,7 +22,7 @@
 #! Note that the job submission script will enforce no more than 32 cpus per GPU.
 #SBATCH --gres=gpu:1
 #! How much wallclock time will be required?
-#SBATCH --time=11:30:00
+#SBATCH --time=11:15:00
 #! What types of email messages do you wish to receive?
 #SBATCH --mail-type=ALL
 #! Uncomment this to prevent the job from being requeued (e.g. if
@@ -57,12 +57,10 @@ module load rhel8/default-amp              # REQUIRED - loads the basic environm
 JOBID=$SLURM_JOB_ID
 
 #! Full path to application executable: 
-application="scripts/run_project.sh"
+application="scripts/run_sweep_agent.sh"
 
 #! Run options for the application:
-runpath=$1
-runid=${2:-$JOBID}
-options="$runpath --run_id $runid --resubmit_after 11"
+options="$@"
 
 #! Work directory (i.e. where the job will run):
 workdir="$SLURM_SUBMIT_DIR"  # The value of SLURM_SUBMIT_DIR sets workdir to the directory

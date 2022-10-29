@@ -1,0 +1,80 @@
+method: grid
+metric:
+  goal: minimize
+  name: valid.loss
+parameters:
+  root_path:
+    distribution: categorical
+    values:
+      - data/EnglishNA_debug/prepared
+  seed:
+    distribution: categorical
+    values:
+      - 32
+  log_interval:
+    distribution: categorical
+    values:
+      - 200
+  save_best_model:
+    distribution: categorical
+    values:
+      - True
+  save_final_model:
+    distribution: categorical
+    values:
+      - True
+  dropout:
+    distribution: categorical
+    values:
+      - 0.2
+      - 0.1
+  hidden_size:
+    distribution: categorical
+    values:
+      - 64
+      - 128
+  inner_linear:
+    distribution: categorical
+    values:
+      - 512
+  n_layers:
+    distribution: categorical
+    values:
+      - 12
+  tied:
+    distribution: categorical
+    values:
+      - false
+  batch_size:
+    distribution: categorical
+    values:
+      - 64
+  clip:
+    distribution: categorical
+    values:
+      - 0.25
+  epochs:
+    distribution: categorical
+    values:
+      - 30
+  lr:
+    distribution: categorical
+    values:
+      - 0.003
+  momentum:
+    distribution: categorical
+    values:
+      - 0.99
+  sequence_length:
+    distribution: categorical
+    values:
+      - 64
+program: run_model.py
+command:
+  - ${env}
+  - python
+  - ${program}
+  - configs/basic.yaml
+  - "--resubmit_after"
+  - 11
+  - ${args}
