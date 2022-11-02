@@ -160,23 +160,31 @@ class PhoneTransformer(object):
 
     def resubmit_job(self):
         """
-        Submit a new slurm job to continue training.
+        Submit a new slurm job to continue training. Bad practise to save a command to a file to be run later but works for now.
         """
 
-        logging.info('Submitting a new job to resume training')
         saved_config = os.path.join(wandb.run.dir, 'config.yaml')
         run_id = wandb.run.id
         command = f'sbatch scripts/slurm_submit.wilkes3 {saved_config} {run_id}'
-        logging.info(f'Running: "{command}"')
-        os.system(command)
-        logging.info('Exiting')
-        exit(0)
+        logging.info('Ending current wandb run')
+        wandb.finish()
+        logging.info('Submitting a new job to resume training')
+        if not os.path.exists('tmp'):
+            os.mkdir('tmp')
+        while os.path.exists('tmp/requeue.sh'):
+            time.sleep(10)
+            logging.info('tmp/requeue.sh already exists - waiting for another process to finish using it')
+        logging.info(f'Saving command to tmp/requeue.sh: "{command}"')
+        with open('tmp/requeue.sh', 'w') as f:
+            f.writelines(command)
+        logging.info('Exiting with error code 124 to requeue job')
+        exit(124)
 
     def log_losses(self, loss, message='', last_time=None):
         logging.info('=' * 89)
         if last_time:
             message = message + ' | time: {:5.2f}s'.format(time.time() - last_time)
-        logging.info('| {} | test loss {:5.2f} | test ppl {:8.2f} | test bpc {:8.3f}'.format(
+        logging.info('| {} | loss {:5.2f} | ppl {:8.2f} | bpc {:8.3f}'.format(
             message, loss, math.exp(loss), loss / math.log(2)))
         logging.info('=' * 89)
 
@@ -265,10 +273,10 @@ class PhoneTransformer(object):
         for epoch in range(self.num_epochs, epochs + 1):
             epoch_start_time = time.time()
             train_loss = train()
-            self.log_losses(train_loss, 'end of epoch {:3d}'.format(epoch), epoch_start_time)
+            self.log_losses(train_loss, 'end of epoch {:3d} | TRAIN STATS'.format(epoch), epoch_start_time)
 
             val_loss = evaluate(val_data, step=self.sequence_length)
-            self.log_losses(val_loss, 'end of epoch {:3d}'.format(epoch), epoch_start_time)
+            self.log_losses(val_loss, 'end of epoch {:3d} | VALID STATS'.format(epoch), epoch_start_time)
 
             # Log to WandB. This also increases wandb.run.step by 1,
             # which is used for setting resumed epoch number
@@ -316,7 +324,7 @@ class PhoneTransformer(object):
         test_loss = evaluate(test_data, step=self.sequence_length)
 
         # Log final loss
-        self.log_losses(test_loss, 'End of training')
+        self.log_losses(test_loss, 'End of training | TEST STATS ')
         wandb.log({'test_loss': test_loss})
 
         if wandb.config.get('save_final_model', True):

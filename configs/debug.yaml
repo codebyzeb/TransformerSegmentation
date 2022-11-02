@@ -2,13 +2,13 @@
 
 root_path:
   desc: Path to the prepared data
-  value: data/Eng-NA/prepared
+  value: data/EnglishNA_debug/prepared
 
 # EXPERIMENT CONFIG
 
 experiment_name:
   desc: Name of the WandB experiment
-  value: experiment_eng-na
+  value: experiment_debug
 log_interval:
   desc: Number of batches to report on
   value: 200
@@ -26,9 +26,9 @@ save_final_model:
   value: True
 
 batch_size: 
-  value: 128
+  value: 64
 epochs:
-  value: 200
+  value: 20
 lr: 
   value: 0.003
 momentum:
@@ -41,15 +41,15 @@ sequence_length:
 
 dropout:
   desc: Percentage of weights to disconnect during training for regularisation.
-  value : 0.05
+  value : 0.1
 hidden_size:
   desc: Size of each embedding in the model.
-  value: 512
+  value: 64
 inner_linear:
   desc: Size of inner layer in feedforward layers.
-  value: 2048
+  value: 512
 n_layers:
   desc: Number of layers in the encoder.
-  value: 12
+  value: 4
 tied:
   value: False
