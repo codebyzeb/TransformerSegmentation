@@ -51,5 +51,3 @@ inner_linear:
 n_layers:
   desc: Number of layers in the encoder.
   value: 12
-tied:
-  value: False

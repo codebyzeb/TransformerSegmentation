@@ -1,7 +1,7 @@
 #!/bin/bash
 echo "Running language model training script"
 source ~/miniconda3/etc/profile.d/conda.sh
-conda activate char_transformer
+conda activate transformer_seg
 CMD="python run_model.py $@"
 eval $CMD
 

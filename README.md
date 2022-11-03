@@ -3,11 +3,17 @@ Can a character-based transformer learn word boundaries?
 
 ## Installation
 
-To run the project, first install the required packages in requirements.txt by creating a conda environment or otherwise:
+To run the project, first create a new virtual environment using conda:
 
 ```
 conda create --name transformer_seg python=3.8 pip
 conda activate transformer_seg
+```
+
+Then, install pytorch (make sure you run the best command for your platform, see [here](https://pytorch.org/)) and the required packages:
+
+```
+conda install pytorch torchvision torchaudio -c pytorch
 pip install -r requirements.txt
 ```
 
