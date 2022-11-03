@@ -109,7 +109,7 @@ class PhoneTransformer(object):
 
         fn = 'corpus.{}.data'.format(hashlib.md5(data_dir.encode()).hexdigest())
         if os.path.exists(fn):
-            logging.info('Loading cached dataset...')
+            logging.info(f'Loading cached dataset at {fn}')
             corpus = torch.load(fn)
         else:
             logging.info('Producing dataset...')
@@ -127,12 +127,11 @@ class PhoneTransformer(object):
         hidden_size = wandb.config.get('hidden_size', 64)
         n_layers = wandb.config.get('n_layers', 16)
         dropout = wandb.config.get('dropout', 0.1)
-        tied = wandb.config.get('tied', False)
         inner_linear = wandb.config.get('inner_linear', 2048)
         sequence_length = wandb.config.get('sequence_length')
         
         model = next_char_transformer(vocab_size, hidden_size=hidden_size, n_layers=n_layers,
-                                    dropout=dropout, tied=tied, max_sequence_len=sequence_length,
+                                    dropout=dropout, max_sequence_len=sequence_length,
                                     intermediate_losses=True, inner_linear=inner_linear).to(self.base_device)
 
         num_params = sum([p.numel() for p in model.parameters()])

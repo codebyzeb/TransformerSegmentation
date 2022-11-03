@@ -80,7 +80,7 @@ class NextCharTransformer(nn.Module):
     """
     def __init__(self, vocab_size, n_layers=64,
                  hidden_size=512, inner_linear=2048,
-                 n_heads=8, dropout=0.55, tied=True, max_sequence_len=512,
+                 n_heads=8, dropout=0.55, max_sequence_len=512,
                  intermediate_layer_predictions=True):
         super(NextCharTransformer, self).__init__()
 
@@ -96,10 +96,6 @@ class NextCharTransformer(nn.Module):
 
         # We don't evaluate on the padding token
         self.criterion = MultiLayerCrossEntropy(vocab_size, ignore_index=0)
-
-        # use weight sharing
-        if tied:
-            self.generator.proj.weight = self.src_embed.lut.weight
 
         # This was important from their code.
         # Initialize parameters with Glorot / fan_avg.
@@ -128,8 +124,8 @@ class NextCharTransformer(nn.Module):
 
 def next_char_transformer(src_vocab, n_layers=64, hidden_size=512,
                           inner_linear=2048, n_heads=8, dropout=0.55,
-                          tied=True, max_sequence_len=512, intermediate_losses=True):
+                          max_sequence_len=512, intermediate_losses=True):
     return NextCharTransformer(src_vocab,
                                n_layers, hidden_size,
                                inner_linear, n_heads,
-                               dropout, tied, max_sequence_len, intermediate_losses)
+                               dropout, max_sequence_len, intermediate_losses)

@@ -1,0 +1,4 @@
+PyYAML==6.0
+wandb==0.13.4
+jupyter==1.0.0
+pandas==1.5.1

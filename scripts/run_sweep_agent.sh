@@ -5,7 +5,7 @@ if [ -z $1 ]; then
 fi
 echo "Running a single run as part of sweep with ID: \"$1\""
 source ~/miniconda3/etc/profile.d/conda.sh
-conda activate char_transformer
+conda activate transformer_seg
 
 CMD="wandb agent --count 1 $1"
 eval $CMD
