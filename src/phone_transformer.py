@@ -109,7 +109,7 @@ class PhoneTransformer(object):
 
         fn = 'corpus.{}.data'.format(hashlib.md5(data_dir.encode()).hexdigest())
         if os.path.exists(fn):
-            logging.info('Loading cached dataset...')
+            logging.info(f'Loading cached dataset at {fn}')
             corpus = torch.load(fn)
         else:
             logging.info('Producing dataset...')
