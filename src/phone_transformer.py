@@ -155,7 +155,7 @@ class PhoneTransformer(object):
         }
         torch.save(checkpoint, model_path)
         logging.info(f'Saving latest checkpoint to wandb')
-        wandb.save(model_name, policy='now')
+        # wandb.save(model_path, policy='now')
 
     def resubmit_job(self):
         """
