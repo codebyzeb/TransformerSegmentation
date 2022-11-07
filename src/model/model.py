@@ -106,6 +106,7 @@ class NextCharTransformer(nn.Module):
         self.vocab_size = vocab_size
         self.intermediate_layer_predictions = intermediate_layer_predictions
         self.n_layers = n_layers
+        self.num_intermediate_losses = n_layers if intermediate_layer_predictions else 1
 
     def forward(self, src, mask):
         """Take in and process masked src and target sequences."""
@@ -117,9 +118,12 @@ class NextCharTransformer(nn.Module):
         """Stop using losses from intermediate layer as function of time in training.
            See section 2.1 - Intermediate Layer Losses
         """
+        self.num_intermediate_losses = 0
         for i, layer in enumerate(self.encoder.layers[:-1]):
             if training_percent > (i // (2 * self.n_layers)):
                 layer.intermediate_layer_predictions = False
+            else:
+                self.num_intermediate_losses += 1
 
 
 def next_char_transformer(src_vocab, n_layers=64, hidden_size=512,

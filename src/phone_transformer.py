@@ -246,7 +246,7 @@ class PhoneTransformer(object):
                 self.model.zero_grad()
                 output = self.model(data, target_mask)
                 average_loss_of_all_layers, final_layer_loss = self.model.criterion(output, target)
-                average_loss_of_all_layers.backward()
+                average_loss_of_all_layers.backward() # Train model on all layer losses, not just final layer
                 self.optimizer.step()
 
                 current_loss.update(final_layer_loss.item(), data.size(0))
@@ -279,7 +279,7 @@ class PhoneTransformer(object):
 
             # Log to WandB. This also increases wandb.run.step by 1,
             # which is used for setting resumed epoch number
-            wandb.log({"train" : {"loss": train_loss}, 'valid': {'loss': val_loss}})
+            wandb.log({"train" : {"loss": train_loss}, 'valid': {'loss': val_loss}, 'num_intermediate_losses' : self.model.num_intermediate_losses})
             
             # Save the model if the validation loss is the best we've seen so far.
             if not best_val_loss or val_loss < best_val_loss:
@@ -292,6 +292,7 @@ class PhoneTransformer(object):
 
             # Let the model know how far through training we are for intermediate layer losses
             self.model.update(epoch // epochs)
+            logging.info(f'Training on losses from final {self.model.num_intermediate_losses} layers')
 
             # Save a checkpoint
             if wandb.config.get('save_latest_checkpoint', True):
