@@ -61,16 +61,18 @@ class MultiLayerCrossEntropy(nn.Module):
     def forward(self, layer_outputs, target):
         total_loss = torch.zeros(1, dtype=layer_outputs[-1].dtype, device=layer_outputs[-1].device)
         n_layers_with_loss = 0
+        all_losses = []
         for layer_output in layer_outputs:
             if layer_output is not None:
                 # For both evaluation and training, we take the loss across the whole predicted sequence
                 loss = self.cross_entropy(layer_output.view(-1, self.vocab_size).contiguous(), target)
                 total_loss += loss
                 n_layers_with_loss += 1
+                all_losses.append(loss)
 
         average_loss_of_all_layers = total_loss / n_layers_with_loss
         final_layer_loss = loss
-        return average_loss_of_all_layers, final_layer_loss
+        return final_layer_loss, average_loss_of_all_layers, all_losses
 
 
 class NextCharTransformer(nn.Module):

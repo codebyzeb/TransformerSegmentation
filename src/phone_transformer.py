@@ -231,7 +231,7 @@ class PhoneTransformer(object):
                 for batch, i in enumerate(range(0, data_source.data.size(0) - 1 - self.sequence_length, step)):
                     data, target, data_mask, target_mask = data_source.get_batch(i)
                     output = self.model(data, target_mask)
-                    _, final_layer_loss = self.model.criterion(output, target)
+                    final_layer_loss, _, _ = self.model.criterion(output, target)
                     total_loss.update(final_layer_loss.item(), data.size(0))
             return total_loss.avg
 
@@ -240,17 +240,20 @@ class PhoneTransformer(object):
             self.model.train()
             current_loss = AverageMeter()
             total_loss = AverageMeter()
+            layer_losses = [AverageMeter() for i in range(self.model.n_layers)]
             start_time = time.time()
             for batch, i in enumerate(range(0, train_data.data.size(0) - 1, self.sequence_length)):
                 data, target, data_mask, target_mask = train_data.get_batch(i)
                 self.model.zero_grad()
                 output = self.model(data, target_mask)
-                average_loss_of_all_layers, final_layer_loss = self.model.criterion(output, target)
+                final_layer_loss, average_loss_of_all_layers, all_layer_losses = self.model.criterion(output, target)
                 average_loss_of_all_layers.backward() # Train model on all layer losses, not just final layer
                 self.optimizer.step()
 
                 current_loss.update(final_layer_loss.item(), data.size(0))
                 total_loss.update(final_layer_loss.item(), data.size(0))
+                for i in range(len(all_layer_losses)):
+                    layer_losses[-1-i].update(all_layer_losses[-1-i].item(), data.size(0))
 
                 if batch % log_interval == 0 and batch > 0:
                     avg_loss = current_loss.avg
@@ -263,7 +266,7 @@ class PhoneTransformer(object):
                     current_loss.reset()
                     start_time = time.time()
 
-            return total_loss.avg
+            return total_loss.avg, [layer_loss.avg for layer_loss in layer_losses]
 
         ###############################################################################
         # Training loop
@@ -271,7 +274,7 @@ class PhoneTransformer(object):
 
         for epoch in range(self.num_epochs, epochs + 1):
             epoch_start_time = time.time()
-            train_loss = train()
+            train_loss, layer_losses = train()
             self.log_losses(train_loss, 'end of epoch {:3d} | TRAIN STATS'.format(epoch), epoch_start_time)
 
             val_loss = evaluate(val_data, step=self.sequence_length)
@@ -279,7 +282,8 @@ class PhoneTransformer(object):
 
             # Log to WandB. This also increases wandb.run.step by 1,
             # which is used for setting resumed epoch number
-            wandb.log({"train" : {"loss": train_loss}, 'valid': {'loss': val_loss}, 'num_intermediate_losses' : self.model.num_intermediate_losses})
+            layer_losses = {f"layer_{i}" : layer_losses[i] for i in range(len(layer_losses))}
+            wandb.log({"train" : {"loss": train_loss}, 'valid': {'loss': val_loss}, 'layer_losses' : layer_losses, 'num_intermediate_losses' : self.model.num_intermediate_losses})
             
             # Save the model if the validation loss is the best we've seen so far.
             if not best_val_loss or val_loss < best_val_loss:
