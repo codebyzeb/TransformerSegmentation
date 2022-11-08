@@ -78,7 +78,7 @@ class PhoneTransformer(object):
         if checkpoint_file:
             logging.info(f'Loading in checkpoint file: {checkpoint_file}')
             checkpoint = torch.load(wandb.restore(checkpoint_file).name)
-            self.model.load_state_dict(checkpoint['learner_state_dict'], strict=False)
+            self.model.load_state_dict(checkpoint['learner_state_dict'])
             self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             os.rename(os.path.join(wandb.run.dir, checkpoint_file),
                 os.path.join(wandb.run.dir, "loaded_checkpoint.pt"))
@@ -146,7 +146,9 @@ class PhoneTransformer(object):
         return optimizer
 
     def save_checkpoint(self, model_name):
-        """ Save a checkpoint and immediately upload it to wandb in case we get terminated """
+        """ Save a checkpoint and upload it to wandb in case we get terminated """
+        self.model.zero_grad()
+        self.optimizer.zero_grad()
         model_path = os.path.join(wandb.run.dir, model_name)
         logging.info(f'Saving model checkpoint to {model_path}')
         checkpoint = {
@@ -243,18 +245,21 @@ class PhoneTransformer(object):
             layer_losses = [AverageMeter() for i in range(self.model.n_layers)]
             start_time = time.time()
             for batch, i in enumerate(range(0, train_data.data.size(0) - 1, self.sequence_length)):
+                # Get batch, run through model, get loss and step optimizer
                 data, target, data_mask, target_mask = train_data.get_batch(i)
-                self.model.zero_grad()
+                self.optimizer.zero_grad()
                 output = self.model(data, target_mask)
                 final_layer_loss, average_loss_of_all_layers, all_layer_losses = self.model.criterion(output, target)
                 average_loss_of_all_layers.backward() # Train model on all layer losses, not just final layer
                 self.optimizer.step()
-
+            
+                # Logging information
                 current_loss.update(final_layer_loss.item(), data.size(0))
                 total_loss.update(final_layer_loss.item(), data.size(0))
                 for i in range(len(all_layer_losses)):
                     layer_losses[-1-i].update(all_layer_losses[-1-i].item(), data.size(0))
 
+                # Logging
                 if batch % log_interval == 0 and batch > 0:
                     avg_loss = current_loss.avg
                     elapsed = time.time() - start_time
@@ -273,6 +278,11 @@ class PhoneTransformer(object):
         ###############################################################################
 
         for epoch in range(self.num_epochs, epochs + 1):
+
+            # Let the model know how far through training we are for intermediate layer losses
+            self.model.update(epoch / epochs)
+            logging.info(f'Training on losses from final {self.model.num_intermediate_losses} layers')
+
             epoch_start_time = time.time()
             train_loss, layer_losses = train()
             self.log_losses(train_loss, 'end of epoch {:3d} | TRAIN STATS'.format(epoch), epoch_start_time)
@@ -293,10 +303,6 @@ class PhoneTransformer(object):
                     self.save_checkpoint("best.pt")
                 else:
                     logging.info("Didn't save best model seen so far - save_best_model set to False")
-
-            # Let the model know how far through training we are for intermediate layer losses
-            self.model.update(epoch // epochs)
-            logging.info(f'Training on losses from final {self.model.num_intermediate_losses} layers')
 
             # Save a checkpoint
             if wandb.config.get('save_latest_checkpoint', True):
