@@ -28,7 +28,7 @@ save_final_model:
 batch_size: 
   value: 64
 epochs:
-  value: 200
+  value: 100
 lr: 
   value: 0.003
 momentum:
