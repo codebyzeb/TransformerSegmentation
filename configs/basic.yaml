@@ -26,7 +26,7 @@ save_final_model:
   value: True
 
 batch_size: 
-  value: 128
+  value: 16
 epochs:
   value: 500
 lr: 
