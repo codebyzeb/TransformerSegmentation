@@ -30,12 +30,12 @@ batch_size:
 epochs:
   value: 500
 lr: 
-  value: 0.3
+  value: 0.003
 momentum:
-  value: 0.9
+  value: 0.99
 sequence_length:
   desc: The maximum length of sequence fed to the model. Used to split the data and to define positional encodings.
-  value: 64
+  value: 128
 
 # MODEL CONFIG
 
@@ -50,4 +50,4 @@ inner_linear:
   value: 1024
 n_layers:
   desc: Number of layers in the encoder.
-  value: 14
+  value: 12
