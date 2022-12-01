@@ -39,20 +39,31 @@ class Corpus(object):
     long tensor of token IDs.
 
     Expects space-delimited characters, but can also tokenize raw text if `raw_text` is true. In
-    this case, lines are not truncated.
+    this case, lines are not truncated and no padding or start/end/boundary tokens are added.
+    
+    If `keep_utterances_separate` is True, will truncate and fill the end of each utterance with <PAD>
+    and start each utterance with <START> and end with <END>. Training script should then avoid calculating loss
+    on the <PAD> token.
+
+    If `keep_utterances_separate` is False, merges all utterances and separates them with the <BOUNDARY> token. No
+    padding or truncating occurs here.
     """
 
-    def __init__(self, path, max_utterance_length=64, truncate_long_utterances=False, raw_text=False):
+    def __init__(self, path, max_utterance_length=64, truncate_long_utterances=False, raw_text=False, keep_utterances_separate=True):
         self.max_utterance_length = max_utterance_length
         self.truncate_long_utterances = truncate_long_utterances
         self.raw_text = raw_text
+        self.keep_utterances_separate = keep_utterances_separate
 
         self.dictionary = Dictionary()
         if not raw_text:
-            self.dictionary.add_word('<PAD>')
-            self.dictionary.add_word('<START>')
-            self.dictionary.add_word('<END>')
-            assert PAD == self.dictionary.word2idx["<PAD>"]
+            if keep_utterances_separate:
+                self.dictionary.add_word('<PAD>')
+                self.dictionary.add_word('<START>')
+                self.dictionary.add_word('<END>')
+                assert PAD == self.dictionary.word2idx["<PAD>"]
+            else:
+                self.dictionary.add_word('<BOUNDARY>')
 
         self.train = self.tokenize(os.path.join(path, 'train.txt'))
         self.valid = self.tokenize(os.path.join(path, 'valid.txt'))
@@ -62,10 +73,6 @@ class Corpus(object):
         """Tokenizes a raw text file, converting all characters to IDs.
         Performs no padding and adds no EOS tokens.
         """
-        if not os.path.exists(path):
-            logger.exception(f'No text file found at {path}')
-            raise Exception(f'No text file found at {path}')
-
         # Add tokens to the dictionary
         with open(path, 'r') as f:
             lines = f.readlines()
@@ -84,9 +91,30 @@ class Corpus(object):
         logging.info(f'Saved {tensor_length} characters')
 
         return ids
-        
 
-    def tokenize_line(self, line):
+    def tokenize_delimited_merged(self, path):
+        """Tokenizes a space delimited text file, merging all utterances. Returns a single tensor containing all tokens as IDs. """
+        # Add tokens to the dictionary
+        with open(path, 'r') as f:
+            lines = [line.split() + ['<BOUNDARY>'] for line in f.readlines()]
+            tensor_length = sum([len(line) for line in lines])
+            logging.info(f'Found {tensor_length-len(lines)} characters in {path}')
+            ids = torch.LongTensor(tensor_length)
+            token_id = 0
+            for line in lines:
+                for token in line:
+                    self.dictionary.add_word(token)
+                    ids[token_id] = self.dictionary.word2idx[token]
+                    token_id += 1
+            
+            assert token_id == tensor_length
+        
+        logging.info(f'Added {len(lines)} utterance boundaries')
+        logging.info(f'Saved {tensor_length} total characters')
+
+        return ids
+        
+    def split_and_pad_line(self, line):
         """ Splits, pads and adds EOS to a line. Returns tokenized line and whether line was truncated.
         Expects a space-delimited line, such as "h e l l o".
         """
@@ -103,9 +131,6 @@ class Corpus(object):
 
     def tokenize_delimited(self, path):
         """Tokenizes a space delimited text file. Returns a single tensor containing all tokens as IDs. """
-        if not os.path.exists(path):
-            logger.exception(f'No text file found at {path}')
-            raise Exception(f'No text file found at {path}')
         
         # Add tokens to the dictionary
         with open(path, 'r') as f:
@@ -113,7 +138,7 @@ class Corpus(object):
             tokenized_lines = []
             long_utterances = 0
             for line in lines:
-                tokens, truncated = self.tokenize_line(line)
+                tokens, truncated = self.split_and_pad_line(line)
                 if truncated:
                     long_utterances += 1
                     if not self.truncate_long_utterances:
@@ -144,10 +169,18 @@ class Corpus(object):
 
     def tokenize(self, path):
         """ Either tokenizes a space delimited file or a raw text file"""
+        if not os.path.exists(path):
+            logger.exception(f'No text file found at {path}')
+            raise Exception(f'No text file found at {path}')
         if self.raw_text:
+            logger.info('Tokenizing raw text (including spaces)')
             return self.tokenize_raw(path)
-        else:
+        elif self.keep_utterances_separate:
+            logger.info('Tokenizing text using space character, keeping utterances separate by adding padding')
             return self.tokenize_delimited(path)
+        else:
+            logger.info('Tokenizing text using space character, merging utterances')
+            return self.tokenize_delimited_merged(path)
 
 # mask subsequent entries
 def subsequent_mask(size):
@@ -167,7 +200,7 @@ class BatchedData():
     """ Starting from sequential data, batches it into columns for efficient processing. """
 
     # Starting from sequential data, arranges the dataset into columns.
-    # For instance, with the alphabet as the sequence and batch size 4, we'd get
+    # For instance, with the alphabet as the sequence and `batch_size` 4, we'd get
     # ┌ a g m s ┐
     # │ b h n t │
     # │ c i o u │
@@ -178,14 +211,12 @@ class BatchedData():
     # dependence of e. g. 'g' on 'f' can not be learned, but allows more efficient
     # batch processing.
 
-    def __init__(self, data, batch_size, sequence_length, base_device, is_train):
+    def __init__(self, data, batch_size, sequence_length, base_device):
         self.sequence_length = sequence_length
         self.base_device = base_device
-        self.is_train = is_train
         self.batch_size = batch_size
 
-        # Work out how cleanly we can divide the dataset into batch_size parts.
-        # Also ensure that each batch starts at the start of an utterance
+        # Make sure every batch is aligned with the start of an utterance
         num_batches = data.size(0) // (batch_size * self.sequence_length)
         # Trim off any extra elements that wouldn't cleanly fit (remainders).
         data = data.narrow(0, 0, num_batches * batch_size * self.sequence_length)
@@ -193,28 +224,23 @@ class BatchedData():
         data = data.view(batch_size, -1).t().contiguous()
         self.data = data.to(self.base_device)
 
-    # get_batch subdivides the data into chunks of length args.bptt.
+    # get_batch subdivides the data into chunks of length `sequence_length`.
     # If source is equal to the example output of the batchify function, with
-    # a bptt-limit of 2, we'd get the following two Variables for i = 0:
+    # a sequence_length of 2, we'd get the following for data, target for i = 0:
     # ┌ a g m s ┐ ┌ b h n t ┐
     # └ b h n t ┘ └ c i o u ┘
     # Note that despite the name of the function, the subdivison of data is not
     # done along the batch dimension (i.e. dimension 1), since that was handled
     # by the batchify function. The chunks are along dimension 0, corresponding
-    # to the seq_len dimension in the LSTM.
+    # to the sequence_length dimension in the LSTM.
 
-    def get_batch(self, i):
-        if self.is_train:
-            # Choose a random sequence in the data if we're training, otherwise use given batch number
-            i = torch.randint(low=0, high=(len(self.data) // self.sequence_length), size=(1,)).long().item() * self.sequence_length
-        
+    def get_batch(self, i):        
         # Make sure we don't spill over the edge of the data
         seq_len = min(self.sequence_length, len(self.data) - 1 - i)
         data = self.data[i:i + seq_len].t()
+
         # Target is sequence shifted by 1.
         target = self.data[i + 1:i + 1 + seq_len].t()
-        # Ensure last token is pad
-        target[:,-1] = torch.zeros(self.batch_size)
 
         # Mask out pad token
         data_mask = (data != PAD).unsqueeze(-2)

@@ -11,7 +11,7 @@ experiment_name:
   value: experiment_eng-na
 log_interval:
   desc: Number of batches to report on
-  value: 200
+  value: 1000
 
 # TRAINING CONFIG
 
@@ -26,13 +26,13 @@ save_final_model:
   value: True
 
 batch_size: 
-  value: 128
+  value: 16
 epochs:
-  value: 200
+  value: 500
 lr: 
-  value: 0.003
+  value: 0.3
 momentum:
-  value: 0.99
+  value: 0.9
 sequence_length:
   desc: The maximum length of sequence fed to the model. Used to split the data and to define positional encodings.
   value: 64
@@ -41,13 +41,13 @@ sequence_length:
 
 dropout:
   desc: Percentage of weights to disconnect during training for regularisation.
-  value : 0.05
+  value : 0.1
 hidden_size:
   desc: Size of each embedding in the model.
-  value: 512
+  value: 128
 inner_linear:
   desc: Size of inner layer in feedforward layers.
-  value: 2048
+  value: 1024
 n_layers:
   desc: Number of layers in the encoder.
-  value: 12
+  value: 14

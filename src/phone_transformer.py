@@ -78,7 +78,7 @@ class PhoneTransformer(object):
         if checkpoint_file:
             logging.info(f'Loading in checkpoint file: {checkpoint_file}')
             checkpoint = torch.load(wandb.restore(checkpoint_file).name)
-            self.model.load_state_dict(checkpoint['learner_state_dict'], strict=False)
+            self.model.load_state_dict(checkpoint['learner_state_dict'])
             self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             os.rename(os.path.join(wandb.run.dir, checkpoint_file),
                 os.path.join(wandb.run.dir, "loaded_checkpoint.pt"))
@@ -107,16 +107,16 @@ class PhoneTransformer(object):
             logging.exception('No training data specified.')
             raise Exception('No training data specified')
 
-        fn = 'corpus.{}.data'.format(hashlib.md5(data_dir.encode()).hexdigest())
+        fn = 'corpus.{}.data'.format('.'.join(data_dir.split('/')))
         if os.path.exists(fn):
             logging.info(f'Loading cached dataset at {fn}')
             corpus = torch.load(fn)
         else:
             logging.info('Producing dataset...')
             if 'text8' in data_dir:
-                corpus = data.Corpus(data_dir, self.sequence_length, truncate_long_utterances=False, raw_text=True)
+                corpus = data.Corpus(data_dir, self.sequence_length, truncate_long_utterances=False, raw_text=True, keep_utterances_separate=False)
             else:
-                corpus = data.Corpus(data_dir, self.sequence_length, truncate_long_utterances=False, raw_text=False)
+                corpus = data.Corpus(data_dir, self.sequence_length, truncate_long_utterances=False, raw_text=False, keep_utterances_separate=False)
             torch.save(corpus, fn)
         return corpus
 
@@ -129,9 +129,12 @@ class PhoneTransformer(object):
         dropout = wandb.config.get('dropout', 0.1)
         inner_linear = wandb.config.get('inner_linear', 2048)
         sequence_length = wandb.config.get('sequence_length')
+
+        # Don't train on <PAD> if using it
+        ignore_index = 0 if self.corpus.keep_utterances_separate else -100
         
         model = next_char_transformer(vocab_size, hidden_size=hidden_size, n_layers=n_layers,
-                                    dropout=dropout, max_sequence_len=sequence_length,
+                                    dropout=dropout, max_sequence_len=sequence_length, ignore_index=ignore_index,
                                     intermediate_losses=True, inner_linear=inner_linear).to(self.base_device)
 
         num_params = sum([p.numel() for p in model.parameters()])
@@ -146,7 +149,9 @@ class PhoneTransformer(object):
         return optimizer
 
     def save_checkpoint(self, model_name):
-        """ Save a checkpoint and immediately upload it to wandb in case we get terminated """
+        """ Save a checkpoint and upload it to wandb in case we get terminated """
+        self.model.zero_grad()
+        self.optimizer.zero_grad()
         model_path = os.path.join(wandb.run.dir, model_name)
         logging.info(f'Saving model checkpoint to {model_path}')
         checkpoint = {
@@ -211,9 +216,9 @@ class PhoneTransformer(object):
         logging.info(f'Using batch_size = {batch_size}')
         eval_batch_size = batch_size
         test_batch_size = 1
-        train_data = data.BatchedData(self.corpus.train, batch_size, self.sequence_length, self.base_device, is_train=True)
-        val_data = data.BatchedData(self.corpus.valid, eval_batch_size, self.sequence_length, self.base_device, is_train=False)
-        test_data = data.BatchedData(self.corpus.test, test_batch_size, self.sequence_length, self.base_device, is_train=False)
+        train_data = data.BatchedData(self.corpus.train, batch_size, self.sequence_length, self.base_device)
+        val_data = data.BatchedData(self.corpus.valid, eval_batch_size, self.sequence_length, self.base_device)
+        test_data = data.BatchedData(self.corpus.test, test_batch_size, self.sequence_length, self.base_device)
 
         ###############################################################################
         # Training code
@@ -229,7 +234,7 @@ class PhoneTransformer(object):
             with torch.no_grad():
                 # Slide a window along of size `step`. Set step=self.sequence_length to evaluate per-utterance
                 for batch, i in enumerate(range(0, data_source.data.size(0) - 1 - self.sequence_length, step)):
-                    data, target, data_mask, target_mask = data_source.get_batch(i)
+                    data, target, _, target_mask = data_source.get_batch(i)
                     output = self.model(data, target_mask)
                     final_layer_loss, _, _ = self.model.criterion(output, target)
                     total_loss.update(final_layer_loss.item(), data.size(0))
@@ -242,19 +247,29 @@ class PhoneTransformer(object):
             total_loss = AverageMeter()
             layer_losses = [AverageMeter() for i in range(self.model.n_layers)]
             start_time = time.time()
-            for batch, i in enumerate(range(0, train_data.data.size(0) - 1, self.sequence_length)):
-                data, target, data_mask, target_mask = train_data.get_batch(i)
-                self.model.zero_grad()
+            for batch in range(0, train_data.data.size(0) - 1, self.sequence_length):
+
+                # For training, we sample batches randomly from the data
+                if self.corpus.keep_utterances_separate:
+                    i = torch.randint(low=0, high=(train_data.data.size(0) // self.sequence_length), size=(1,)).long().item() * self.sequence_length
+                else:
+                    i = torch.randint(low=0, high=(train_data.data.size(0) - self.sequence_length), size=(1,)).long().item()
+
+                # Get batch, run through model, get loss and step optimizer
+                data, target, _, target_mask = train_data.get_batch(i)
+                self.optimizer.zero_grad()
                 output = self.model(data, target_mask)
                 final_layer_loss, average_loss_of_all_layers, all_layer_losses = self.model.criterion(output, target)
                 average_loss_of_all_layers.backward() # Train model on all layer losses, not just final layer
                 self.optimizer.step()
-
+            
+                # Logging information
                 current_loss.update(final_layer_loss.item(), data.size(0))
                 total_loss.update(final_layer_loss.item(), data.size(0))
                 for i in range(len(all_layer_losses)):
                     layer_losses[-1-i].update(all_layer_losses[-1-i].item(), data.size(0))
 
+                # Logging
                 if batch % log_interval == 0 and batch > 0:
                     avg_loss = current_loss.avg
                     elapsed = time.time() - start_time
@@ -273,6 +288,11 @@ class PhoneTransformer(object):
         ###############################################################################
 
         for epoch in range(self.num_epochs, epochs + 1):
+
+            # Let the model know how far through training we are for intermediate layer losses
+            self.model.update(epoch / epochs)
+            logging.info(f'Training on losses from final {self.model.num_intermediate_losses} layers')
+
             epoch_start_time = time.time()
             train_loss, layer_losses = train()
             self.log_losses(train_loss, 'end of epoch {:3d} | TRAIN STATS'.format(epoch), epoch_start_time)
@@ -293,10 +313,6 @@ class PhoneTransformer(object):
                     self.save_checkpoint("best.pt")
                 else:
                     logging.info("Didn't save best model seen so far - save_best_model set to False")
-
-            # Let the model know how far through training we are for intermediate layer losses
-            self.model.update(epoch // epochs)
-            logging.info(f'Training on losses from final {self.model.num_intermediate_losses} layers')
 
             # Save a checkpoint
             if wandb.config.get('save_latest_checkpoint', True):
@@ -325,7 +341,7 @@ class PhoneTransformer(object):
         self.model.load_state_dict(checkpoint['learner_state_dict'], strict=False)
 
         # Run on test data.
-        test_loss = evaluate(test_data, step=self.sequence_length)
+        test_loss = evaluate(test_data, step=self.sequence_length if self.corpus.keep_utterances_separate else 1)
 
         # Log final loss
         self.log_losses(test_loss, 'End of training | TEST STATS ')

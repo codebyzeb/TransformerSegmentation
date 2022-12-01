@@ -82,7 +82,7 @@ class NextCharTransformer(nn.Module):
     """
     def __init__(self, vocab_size, n_layers=64,
                  hidden_size=512, inner_linear=2048,
-                 n_heads=8, dropout=0.55, max_sequence_len=512,
+                 n_heads=8, dropout=0.55, max_sequence_len=512, ignore_index=-100,
                  intermediate_layer_predictions=True):
         super(NextCharTransformer, self).__init__()
 
@@ -96,8 +96,8 @@ class NextCharTransformer(nn.Module):
                                n_layers, intermediate_layer_predictions)
         self.embed = Embeddings(hidden_size, vocab_size)
 
-        # We don't evaluate on the padding token
-        self.criterion = MultiLayerCrossEntropy(vocab_size, ignore_index=0)
+        # Set ignore_index to 0 to avoid training on padding token
+        self.criterion = MultiLayerCrossEntropy(vocab_size, ignore_index=ignore_index)
 
         # This was important from their code.
         # Initialize parameters with Glorot / fan_avg.
@@ -120,18 +120,18 @@ class NextCharTransformer(nn.Module):
         """Stop using losses from intermediate layer as function of time in training.
            See section 2.1 - Intermediate Layer Losses
         """
-        self.num_intermediate_losses = 0
+        self.num_intermediate_losses = 1
         for i, layer in enumerate(self.encoder.layers[:-1]):
-            if training_percent > (i // (2 * self.n_layers)):
+            if training_percent > ((i+1) / (2 * self.n_layers)):
                 layer.intermediate_layer_predictions = False
             else:
                 self.num_intermediate_losses += 1
 
 
 def next_char_transformer(src_vocab, n_layers=64, hidden_size=512,
-                          inner_linear=2048, n_heads=8, dropout=0.55,
+                          inner_linear=2048, n_heads=8, dropout=0.55, ignore_index=-100,
                           max_sequence_len=512, intermediate_losses=True):
     return NextCharTransformer(src_vocab,
                                n_layers, hidden_size,
                                inner_linear, n_heads,
-                               dropout, max_sequence_len, intermediate_losses)
+                               dropout, max_sequence_len, ignore_index, intermediate_losses)
