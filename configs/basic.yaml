@@ -2,7 +2,7 @@
 
 root_path:
   desc: Path to the prepared data
-  value: data/Eng-NA/prepared
+  value: data/Eng-NA
 
 # EXPERIMENT CONFIG
 

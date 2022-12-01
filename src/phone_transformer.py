@@ -18,6 +18,7 @@ import torch.onnx
 
 from .data import data
 from .model.model import next_char_transformer
+from .segmentation.segment import Segmenter
 
 
 DEFAULT_DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -114,14 +115,16 @@ class PhoneTransformer(object):
         else:
             logging.info('Producing dataset...')
             if 'text8' in data_dir:
-                corpus = data.Corpus(data_dir, self.sequence_length, truncate_long_utterances=False, raw_text=True, keep_utterances_separate=False)
+                logging.info('Using Raw Tokenizer for text8')
+                tokenizer = data.RawTokenizer()
             else:
-                corpus = data.Corpus(data_dir, self.sequence_length, truncate_long_utterances=False, raw_text=False, keep_utterances_separate=False)
+                logging.info('Using Space Tokenizer and removing word boundary token')
+                tokenizer = data.SpaceTokenizer(banned_tokens=[';eword'])
+            corpus = data.Corpus(data_dir, tokenizer)
             torch.save(corpus, fn)
         return corpus
 
     def load_model(self):
-        # TODO: Maybe just pass in the MODEL dict directly?
         logging.info('Building model...')
         vocab_size = len(self.corpus.dictionary)
         hidden_size = wandb.config.get('hidden_size', 64)
@@ -130,8 +133,8 @@ class PhoneTransformer(object):
         inner_linear = wandb.config.get('inner_linear', 2048)
         sequence_length = wandb.config.get('sequence_length')
 
-        # Don't train on <PAD> if using it
-        ignore_index = 0 if self.corpus.keep_utterances_separate else -100
+        # Don't train on <PAD>
+        ignore_index = 0
         
         model = next_char_transformer(vocab_size, hidden_size=hidden_size, n_layers=n_layers,
                                     dropout=dropout, max_sequence_len=sequence_length, ignore_index=ignore_index,
@@ -202,6 +205,7 @@ class PhoneTransformer(object):
         ###############################################################################
 
         log_interval = wandb.config.get('log_interval', 200)
+        segment_interval = wandb.config.get('segment_interval', 50)
 
         # metric for logging training data
         # wandb.define_metric('epoch')
@@ -227,6 +231,11 @@ class PhoneTransformer(object):
         best_val_loss = None
         epochs = wandb.config.get('epochs', 2)
 
+        # def get_segmentation_performance():
+        #     data_dir = wandb.config.get('root_path', '')
+        #     test_dir = os.path.join(data_dir, 'test.txt')
+        #     segmenter = Segmenter(self.model, test_dir, self.corpus)
+            
         def evaluate(data_source, step=1):
             # Turn on evaluation mode which disables dropout.
             total_loss = AverageMeter()
@@ -250,10 +259,11 @@ class PhoneTransformer(object):
             for batch in range(0, train_data.data.size(0) - 1, self.sequence_length):
 
                 # For training, we sample batches randomly from the data
-                if self.corpus.keep_utterances_separate:
-                    i = torch.randint(low=0, high=(train_data.data.size(0) // self.sequence_length), size=(1,)).long().item() * self.sequence_length
-                else:
-                    i = torch.randint(low=0, high=(train_data.data.size(0) - self.sequence_length), size=(1,)).long().item()
+                # TODO: CHECK IF KEEPING UTTERANCES SEPARATE
+                #if self.corpus.keep_utterances_separate:
+                #    i = torch.randint(low=0, high=(train_data.data.size(0) // self.sequence_length), size=(1,)).long().item() * self.sequence_length
+                # else:
+                i = torch.randint(low=0, high=(train_data.data.size(0) - self.sequence_length), size=(1,)).long().item()
 
                 # Get batch, run through model, get loss and step optimizer
                 data, target, _, target_mask = train_data.get_batch(i)
@@ -295,15 +305,24 @@ class PhoneTransformer(object):
 
             epoch_start_time = time.time()
             train_loss, layer_losses = train()
+            layer_losses = {f"layer_{i}" : layer_losses[i] for i in range(len(layer_losses))}
             self.log_losses(train_loss, 'end of epoch {:3d} | TRAIN STATS'.format(epoch), epoch_start_time)
 
             val_loss = evaluate(val_data, step=self.sequence_length)
             self.log_losses(val_loss, 'end of epoch {:3d} | VALID STATS'.format(epoch), epoch_start_time)
 
+            # Every `segment_interval` epochs, we also check segmentation performance
+            # TODO: ADD HERE
+
             # Log to WandB. This also increases wandb.run.step by 1,
             # which is used for setting resumed epoch number
-            layer_losses = {f"layer_{i}" : layer_losses[i] for i in range(len(layer_losses))}
-            wandb.log({"train" : {"loss": train_loss}, 'valid': {'loss': val_loss}, 'layer_losses' : layer_losses, 'num_intermediate_losses' : self.model.num_intermediate_losses})
+            log_dict = {'train' : {"loss": train_loss},
+                        'valid': {'loss': val_loss},
+                        'layer_losses' : layer_losses,
+                        'num_intermediate_losses' : self.model.num_intermediate_losses,
+                        'epoch' : epoch}
+            
+            wandb.log(log_dict)
             
             # Save the model if the validation loss is the best we've seen so far.
             if not best_val_loss or val_loss < best_val_loss:

@@ -29,96 +29,99 @@ class Dictionary(object):
     def __len__(self):
         return len(self.idx2word)
 
+class RawTokenizer(object):
+    """ Creates a dictionary, tokenizes raw text and returns a tensor of token ID.
+        Converts all characters to IDs, performing no padding and adding no EOS tokens. """
 
-class Corpus(object):
-    """ Pre-processes and stores a corpus of train, test and validation data. 
-
-    Given a path, expects to find a "train.txt", "valid.txt" and "test.txt" file at that path. 
-    For each file, tokenises each line in that file, truncating it if it exceeds the maximum
-    utterance length and padding it otherwise. Each split of the data is stored as a single
-    long tensor of token IDs.
-
-    Expects space-delimited characters, but can also tokenize raw text if `raw_text` is true. In
-    this case, lines are not truncated and no padding or start/end/boundary tokens are added.
-    
-    If `keep_utterances_separate` is True, will truncate and fill the end of each utterance with <PAD>
-    and start each utterance with <START> and end with <END>. Training script should then avoid calculating loss
-    on the <PAD> token.
-
-    If `keep_utterances_separate` is False, merges all utterances and separates them with the <BOUNDARY> token. No
-    padding or truncating occurs here.
-    """
-
-    def __init__(self, path, max_utterance_length=64, truncate_long_utterances=False, raw_text=False, keep_utterances_separate=True):
-        self.max_utterance_length = max_utterance_length
-        self.truncate_long_utterances = truncate_long_utterances
-        self.raw_text = raw_text
-        self.keep_utterances_separate = keep_utterances_separate
-
+    def __init__(self):
         self.dictionary = Dictionary()
-        if not raw_text:
-            if keep_utterances_separate:
-                self.dictionary.add_word('<PAD>')
-                self.dictionary.add_word('<START>')
-                self.dictionary.add_word('<END>')
-                assert PAD == self.dictionary.word2idx["<PAD>"]
-            else:
-                self.dictionary.add_word('<BOUNDARY>')
+        # We always add the padding token, even if it isn't used, because other functions mask it
+        self.dictionary.add_word('<PAD>')
 
-        self.train = self.tokenize(os.path.join(path, 'train.txt'))
-        self.valid = self.tokenize(os.path.join(path, 'valid.txt'))
-        self.test = self.tokenize(os.path.join(path, 'test.txt'))
-
-    def tokenize_raw(self, path):
-        """Tokenizes a raw text file, converting all characters to IDs.
-        Performs no padding and adds no EOS tokens.
-        """
-        # Add tokens to the dictionary
+    def tokenize(self, path):
+        if not os.path.exists(path):
+            logger.exception(f'No text file found at {path}')
+            raise Exception(f'No text file found at {path}')
+        logger.info(f'Loading in characters from {path}')
         with open(path, 'r') as f:
             lines = f.readlines()
-            tensor_length = sum([len(line) for line in lines])
-            logging.info(f'Found {tensor_length} characters in {path}')
-            token_id = 0
-            ids = torch.LongTensor(tensor_length)
-            for line in lines:
-                for token in line:
-                    self.dictionary.add_word(token)
-                    ids[token_id] = self.dictionary.word2idx[token]
-                    token_id += 1
-            
-            assert token_id == tensor_length
+        return self.tokenize_lines(lines)
+
+    def tokenize_lines(self, lines):
+        logger.info('Tokenizing raw text (including spaces)')
+        tensor_length = sum([len(line) for line in lines])
+        logging.info(f'Found {tensor_length} characters in file')
+        token_id = 0
+        ids = torch.LongTensor(tensor_length)
+        for line in lines:
+            for token in line:
+                self.dictionary.add_word(token)
+                ids[token_id] = self.dictionary.word2idx[token]
+                token_id += 1
+        
+        assert token_id == tensor_length
 
         logging.info(f'Saved {tensor_length} characters')
 
         return ids
 
-    def tokenize_delimited_merged(self, path):
-        """Tokenizes a space delimited text file, merging all utterances. Returns a single tensor containing all tokens as IDs. """
-        # Add tokens to the dictionary
-        with open(path, 'r') as f:
-            lines = [line.split() + ['<BOUNDARY>'] for line in f.readlines()]
-            tensor_length = sum([len(line) for line in lines])
-            logging.info(f'Found {tensor_length-len(lines)} characters in {path}')
-            ids = torch.LongTensor(tensor_length)
-            token_id = 0
+class SpaceTokenizer(RawTokenizer):
+    """ Creates a dictionary, tokenizes text according to space characters and returns a tensor of token ID.
+        Converts all characters to IDs and additionally, adds a <BOUNDARY> token between each line in the file. Removes banned tokens. """
+
+    def __init__(self, banned_tokens=None):
+        RawTokenizer.__init__(self)
+        self.dictionary.add_word('<BOUNDARY>')
+        self.banned_tokens = banned_tokens
+
+    def remove_tokens(self, lines):
+        if self.banned_tokens:
             for line in lines:
-                for token in line:
-                    self.dictionary.add_word(token)
-                    ids[token_id] = self.dictionary.word2idx[token]
-                    token_id += 1
+                for token in self.banned_tokens:
+                    if token in line:
+                        line.remove(token)
+
+    def tokenize_lines(self, lines):
+        logger.info('Tokenizing text using space character, merging utterances')
+        lines = [line.split() + ['<BOUNDARY>'] for line in lines]
+        self.remove_tokens(lines)
+                    
+        tensor_length = sum([len(line) for line in lines])
+        logging.info(f'Found {tensor_length-len(lines)} characters in file')
+        ids = torch.LongTensor(tensor_length)
+        token_id = 0
+        for line in lines:
+            for token in line:
+                self.dictionary.add_word(token)
+                ids[token_id] = self.dictionary.word2idx[token]
+                token_id += 1
             
-            assert token_id == tensor_length
+        assert token_id == tensor_length
         
         logging.info(f'Added {len(lines)} utterance boundaries')
         logging.info(f'Saved {tensor_length} total characters')
 
         return ids
-        
+
+class TruncateTokenizer(RawTokenizer):
+    """ Creates a dictionary, tokenizes text according to space characters and preserves line boundaries by 
+        truncating and adding start, end and padding tokens to each line. Converts all characters to IDs. Removes banned tokens. """
+
+    def __init__(self, max_utterance_length, banned_tokens=None):
+        RawTokenizer.__init__(self)
+        self.max_utterance_length = max_utterance_length
+        self.dictionary.add_word('<START>')
+        self.dictionary.add_word('<END>')
+        self.banned_tokens = banned_tokens
+
     def split_and_pad_line(self, line):
         """ Splits, pads and adds EOS to a line. Returns tokenized line and whether line was truncated.
-        Expects a space-delimited line, such as "h e l l o".
-        """
+            Expects a space-delimited line, such as "h e l l o". Removes banned tokens. """
         tokens = line.split()
+        if self.banned_tokens:
+            for token in self.banned_tokens:
+                if token in line:
+                    line.remove(token)
         truncated = False
         if len(tokens) + 2 > self.max_utterance_length:
             truncated = True
@@ -129,58 +132,54 @@ class Corpus(object):
         
         return tokens, truncated
 
-    def tokenize_delimited(self, path):
-        """Tokenizes a space delimited text file. Returns a single tensor containing all tokens as IDs. """
+    def tokenize_lines(self, lines):
+        logger.info('Tokenizing text using space character, keeping utterances separate by adding padding') 
+        tokenized_lines = []
+        long_utterances = 0
+        for line in lines:
+            tokens, truncated = self.split_and_pad_line(line)
+            if truncated:
+                long_utterances += 1
+                continue
+            tokenized_lines.append(tokens)
+            for token in tokens:
+                self.dictionary.add_word(token)
         
-        # Add tokens to the dictionary
-        with open(path, 'r') as f:
-            lines = f.readlines()
-            tokenized_lines = []
-            long_utterances = 0
-            for line in lines:
-                tokens, truncated = self.split_and_pad_line(line)
-                if truncated:
-                    long_utterances += 1
-                    if not self.truncate_long_utterances:
-                        continue
-                tokenized_lines.append(tokens)
-                for token in tokens:
-                    self.dictionary.add_word(token)
-            
-            tensor_length = len(tokenized_lines) * self.max_utterance_length
-            ids = torch.LongTensor(tensor_length)
-            token_id = 0
-            for line in tokenized_lines:
-                for token in line:
-                    ids[token_id] = self.dictionary.word2idx[token]
-                    token_id += 1
-            
-            assert token_id == len(tokenized_lines) * self.max_utterance_length
+        tensor_length = len(tokenized_lines) * self.max_utterance_length
+        ids = torch.LongTensor(tensor_length)
+        token_id = 0
+        for line in tokenized_lines:
+            for token in line:
+                ids[token_id] = self.dictionary.word2idx[token]
+                token_id += 1
         
-        logging.info(f'Found {len(lines)} utterances in {path}')
+        assert token_id == len(tokenized_lines) * self.max_utterance_length
+        
+        logging.info(f'Found {len(lines)} utterances in file')
         if long_utterances > 0:
-            if self.truncate_long_utterances:
-                logging.info(f'Truncated {long_utterances} utterances that were longer than max sequence length of {self.max_utterance_length}')
-            else:
-                logging.info(f'Discarded {long_utterances} utterances that were longer than max sequence length of {self.max_utterance_length}')
+            logging.info(f'Discarded {long_utterances} utterances that were longer than max sequence length of {self.max_utterance_length}')
         logging.info(f'Saved {len(tokenized_lines)} utterances')
 
         return ids
 
-    def tokenize(self, path):
-        """ Either tokenizes a space delimited file or a raw text file"""
-        if not os.path.exists(path):
-            logger.exception(f'No text file found at {path}')
-            raise Exception(f'No text file found at {path}')
-        if self.raw_text:
-            logger.info('Tokenizing raw text (including spaces)')
-            return self.tokenize_raw(path)
-        elif self.keep_utterances_separate:
-            logger.info('Tokenizing text using space character, keeping utterances separate by adding padding')
-            return self.tokenize_delimited(path)
-        else:
-            logger.info('Tokenizing text using space character, merging utterances')
-            return self.tokenize_delimited_merged(path)
+
+class Corpus(object):
+    """ Pre-processes and stores a corpus of train, test and validation data. 
+
+    Given a path, expects to find a "train.txt", "valid.txt" and "test.txt" file at that path. 
+    For each file, tokenises each line in that file, truncating it if it exceeds the maximum
+    utterance length and padding it otherwise. Each split of the data is stored as a single
+    long tensor of token IDs.
+
+    """
+
+    def __init__(self, path, tokenizer):
+        self.dictionary = tokenizer.dictionary
+        self.tokenizer = tokenizer
+
+        self.train = self.tokenizer.tokenize(os.path.join(path, 'train.txt'))
+        self.valid = self.tokenizer.tokenize(os.path.join(path, 'valid.txt'))
+        self.test = self.tokenizer.tokenize(os.path.join(path, 'test.txt'))
 
 # mask subsequent entries
 def subsequent_mask(size):
