@@ -76,15 +76,18 @@ class SpaceTokenizer(RawTokenizer):
 
     def remove_tokens(self, lines):
         if self.banned_tokens:
+            new_lines = []
             for line in lines:
                 for token in self.banned_tokens:
-                    if token in line:
-                        line.remove(token)
+                    line = [t for t in line if t != token]
+                new_lines.append(line)
+            lines = new_lines
+        return lines
 
     def tokenize_lines(self, lines):
         logger.info('Tokenizing text using space character, merging utterances')
         lines = [line.split() + ['<BOUNDARY>'] for line in lines]
-        self.remove_tokens(lines)
+        lines = self.remove_tokens(lines)
                     
         tensor_length = sum([len(line) for line in lines])
         logging.info(f'Found {tensor_length-len(lines)} characters in file')
@@ -121,7 +124,7 @@ class TruncateTokenizer(RawTokenizer):
         if self.banned_tokens:
             for token in self.banned_tokens:
                 if token in line:
-                    line.remove(token)
+                    line = [t for t in line if t != token]
         truncated = False
         if len(tokens) + 2 > self.max_utterance_length:
             truncated = True

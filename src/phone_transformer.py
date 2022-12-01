@@ -263,7 +263,11 @@ class PhoneTransformer(object):
                 #if self.corpus.keep_utterances_separate:
                 #    i = torch.randint(low=0, high=(train_data.data.size(0) // self.sequence_length), size=(1,)).long().item() * self.sequence_length
                 # else:
+
+
                 i = torch.randint(low=0, high=(train_data.data.size(0) - self.sequence_length), size=(1,)).long().item()
+
+                print(self.corpus.dictionary.word2idx[';eword'])
 
                 # Get batch, run through model, get loss and step optimizer
                 data, target, _, target_mask = train_data.get_batch(i)
