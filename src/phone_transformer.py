@@ -267,8 +267,6 @@ class PhoneTransformer(object):
 
                 i = torch.randint(low=0, high=(train_data.data.size(0) - self.sequence_length), size=(1,)).long().item()
 
-                print(self.corpus.dictionary.word2idx[';eword'])
-
                 # Get batch, run through model, get loss and step optimizer
                 data, target, _, target_mask = train_data.get_batch(i)
                 self.optimizer.zero_grad()
