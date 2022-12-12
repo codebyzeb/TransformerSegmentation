@@ -362,7 +362,7 @@ class PhoneTransformer(object):
         self.model.load_state_dict(checkpoint['learner_state_dict'], strict=False)
 
         # Run on test data.
-        test_loss = evaluate(test_data, step=self.sequence_length if self.corpus.keep_utterances_separate else 1)
+        test_loss = evaluate(test_data, step=1) #self.sequence_length if self.corpus.keep_utterances_separate else 1)
 
         # Log final loss
         self.log_losses(test_loss, 'End of training | TEST STATS ')
