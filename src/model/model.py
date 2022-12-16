@@ -33,7 +33,7 @@ class EncoderLayer(nn.Module):
 
 
 class Encoder(nn.Module):
-    """Core encoder is a stack of N layers"""
+    """ Core encoder is a stack of N layers"""
 
     def __init__(self, layer, n_layers, intermediate_layer_predictions=True):
         super(Encoder, self).__init__()
@@ -53,6 +53,7 @@ class Encoder(nn.Module):
 
 
 class MultiLayerCrossEntropy(nn.Module):
+    """ Cross entropy loss for multiple layers. """
     def __init__(self, vocab_size, *args, **kwargs):
         super(MultiLayerCrossEntropy, self).__init__()
         self.cross_entropy = nn.CrossEntropyLoss(*args, **kwargs)
@@ -76,10 +77,8 @@ class MultiLayerCrossEntropy(nn.Module):
 
 
 class NextCharTransformer(nn.Module):
-    """
-    A standard next-character prediction model. Base for this and many
-    other models.
-    """
+    """ Next character transformer model. """
+
     def __init__(self, vocab_size, n_layers=64,
                  hidden_size=512, inner_linear=2048,
                  n_heads=8, dropout=0.55, max_sequence_len=512, ignore_index=-100,
@@ -96,14 +95,12 @@ class NextCharTransformer(nn.Module):
                                n_layers, intermediate_layer_predictions)
         self.embed = Embeddings(hidden_size, vocab_size)
 
-        # Set ignore_index to 0 to avoid training on padding token
+        # Set ignore_index to avoid training on padding token
         self.criterion = MultiLayerCrossEntropy(vocab_size, ignore_index=ignore_index)
 
-        # This was important from their code.
-        # Initialize parameters with Glorot / fan_avg.
-        # for p in self.parameters():
-        #     if p.dim() > 1:
-        #         nn.init.xavier_uniform_(p)
+        for p in self.parameters():
+            if p.dim() > 1:
+                nn.init.xavier_uniform_(p)
 
         self.vocab_size = vocab_size
         self.intermediate_layer_predictions = intermediate_layer_predictions
@@ -111,15 +108,16 @@ class NextCharTransformer(nn.Module):
         self.num_intermediate_losses = n_layers if intermediate_layer_predictions else 1
 
     def forward(self, src, mask):
-        """Take in and process masked src and target sequences."""
+        """ Take in and process masked src and target sequences. """
         src_emb = self.embed(src)
         emb, intermediate_predictions = self.encoder(src_emb, mask)
         return intermediate_predictions
 
     def update(self, training_percent):
-        """Stop using losses from intermediate layer as function of time in training.
-           See section 2.1 - Intermediate Layer Losses
+        """ Stop using losses from intermediate layer as function of time in training.
+        See section 2.1 - Intermediate Layer Losses from Character Transformer paper. 
         """
+
         self.num_intermediate_losses = 1
         for i, layer in enumerate(self.encoder.layers[:-1]):
             if training_percent > ((i+1) / (2 * self.n_layers)):
@@ -131,7 +129,7 @@ class NextCharTransformer(nn.Module):
 def next_char_transformer(src_vocab, n_layers=64, hidden_size=512,
                           inner_linear=2048, n_heads=8, dropout=0.55, ignore_index=-100,
                           max_sequence_len=512, intermediate_losses=True):
-    return NextCharTransformer(src_vocab,
-                               n_layers, hidden_size,
-                               inner_linear, n_heads,
-                               dropout, max_sequence_len, ignore_index, intermediate_losses)
+    """ Construct a next character transformer model. """
+    return NextCharTransformer(src_vocab, n_layers, hidden_size,
+                               inner_linear, n_heads, dropout, max_sequence_len,
+                               ignore_index, intermediate_losses)

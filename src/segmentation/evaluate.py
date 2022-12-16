@@ -11,7 +11,7 @@ performance or not.
 import collections
 
 class TokenEvaluation(object):
-    """Evaluation of token f-score, precision and recall"""
+    """ Evaluation of token f-score, precision and recall"""
     def __init__(self):
         self.test = 0
         self.gold = 0
@@ -107,23 +107,24 @@ class BoundaryNoEdgeEvaluation(BoundaryEvaluation):
 
 
 class _StringPos(object):
-    """Compute start and stop index of words in an utterance"""
+    """C ompute start and stop index of words in an utterance"""
     def __init__(self):
         self.idx = 0
 
     def __call__(self, n):
-        """Return the position of the current word given its length `n`"""
+        """ Return the position of the current word given its length `n`"""
         start = self.idx
         self.idx += n
         return start, self.idx
 
 
 def read_data(text):
-    """Load text data for evaluation
+    """ Load text data for evaluation
     Parameters
     ----------
     text : list of str
         The list of utterances to read for the evaluation.
+    
     Returns
     -------
     (words, positions, lexicon) : three lists
@@ -153,7 +154,7 @@ def read_data(text):
 
 
 def evaluate(text, gold):
-    """Scores a segmented text against its gold version
+    """ Scores a segmented text against its gold version
     Parameters
     ----------
     text : sequence of str
@@ -163,6 +164,7 @@ def evaluate(text, gold):
     separator : Separator, optional
         The token separation in `text` and `gold`, only word level is
         considered, default to space separated words.
+    
     Returns
     -------
     scores : dict
@@ -179,6 +181,7 @@ def evaluate(text, gold):
         * 'boundary_noedge_fscore'
         * 'boundary_noedge_precision'
         * 'boundary_noedge_recall'
+
     Raises
     ------
     ValueError

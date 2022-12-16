@@ -26,16 +26,16 @@ save_final_model:
   value: True
 
 batch_size: 
-  value: 1
+  value: 8
 epochs:
-  value: 100
+  value: 10
 lr: 
   value: 0.003
 momentum:
   value: 0.99
 sequence_length:
   desc: The maximum length of sequence fed to the model. Used to split the data and to define positional encodings.
-  value: 120
+  value: 16
 
 # MODEL CONFIG
 
@@ -44,10 +44,10 @@ dropout:
   value : 0.1
 hidden_size:
   desc: Size of each embedding in the model.
-  value: 256
+  value: 64
 inner_linear:
   desc: Size of inner layer in feedforward layers.
-  value: 512
+  value: 128
 n_layers:
   desc: Number of layers in the encoder.
-  value: 10
+  value: 4

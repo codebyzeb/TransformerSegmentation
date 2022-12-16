@@ -1,10 +1,8 @@
 import copy
 
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.autograd import Variable
 
 import math
 
@@ -21,15 +19,14 @@ def attention(query, key, value, mask=None, dropout=None):
              / math.sqrt(d_k)
     if mask is not None:
         scores = scores.masked_fill(mask == 0, -1e9)
-    p_attn = F.softmax(scores, dim=-1)
+    p_attn = F.softmax(scores, dim = -1)
     if dropout is not None:
         p_attn = dropout(p_attn)
     return torch.matmul(p_attn, value), p_attn
 
-
 class MultiHeadedAttention(nn.Module):
     def __init__(self, h, d_model, dropout=0.1):
-        """Take in model size and number of heads."""
+        """ Take in model size and number of heads."""
         super(MultiHeadedAttention, self).__init__()
         assert d_model % h == 0
         # We assume d_v always equals d_k
@@ -40,7 +37,6 @@ class MultiHeadedAttention(nn.Module):
         self.dropout = nn.Dropout(p=dropout)
 
     def forward(self, query, key, value, mask=None):
-        """Implements Figure 2"""
         if mask is not None:
             # Same mask applied to all h heads.
             mask = mask.unsqueeze(1)
@@ -75,14 +71,6 @@ class SublayerConnection(nn.Module):
         "Apply residual connection to any sublayer with the same size."
         return x + self.dropout(sublayer(self.norm(x)))
 
-
-def subsequent_mask(size):
-    """Mask out subsequent positions."""
-    attn_shape = (1, size, size)
-    subsequent_mask = np.triu(np.ones(attn_shape), k=1).astype('uint8')
-    return torch.from_numpy(subsequent_mask) == 0
-
-
 class PositionwiseFeedForward(nn.Module):
     """Implements FFN equation."""
 
@@ -108,6 +96,7 @@ class Generator(nn.Module):
 # In the embedding layer, we multiply weights by sqrt(d_model)
 class Embeddings(nn.Module):
     def __init__(self, d_model, vocab):
+        """ Initialize the embedding layer. """
         super(Embeddings, self).__init__()
         self.lut = nn.Embedding(vocab, d_model)
         self.d_model = d_model

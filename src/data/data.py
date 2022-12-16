@@ -11,6 +11,8 @@ logger = logging.getLogger(__name__)
 PAD = 0
 
 class Dictionary(object):
+    """ A mapping from symbols to consecutive integers """
+    
     def __init__(self):
         self.word2idx = {}
         self.idx2word = []
@@ -18,6 +20,18 @@ class Dictionary(object):
         self.total = 0
 
     def add_word(self, word):
+        """ Adds a word to the dictionary 
+        Parameters
+        ----------
+        word : str
+            The word to add to the dictionary.
+        
+        Returns
+        -------
+        token_id : int
+            The ID of the word in the dictionary.
+        """
+
         if word not in self.word2idx:
             self.idx2word.append(word)
             self.word2idx[word] = len(self.idx2word) - 1
@@ -27,6 +41,7 @@ class Dictionary(object):
         return self.word2idx[word]
 
     def __len__(self):
+        """ Returns the number of words in the dictionary """
         return len(self.idx2word)
 
 class RawTokenizer(object):
@@ -34,11 +49,13 @@ class RawTokenizer(object):
         Converts all characters to IDs, performing no padding and adding no EOS tokens. """
 
     def __init__(self):
+        """ Initializes the dictionary """
         self.dictionary = Dictionary()
         # We always add the padding token, even if it isn't used, because other functions mask it
         self.dictionary.add_word('<PAD>')
 
     def tokenize(self, path):
+        """ Tokenizes raw text and returns a tensor of token IDs."""
         if not os.path.exists(path):
             logger.exception(f'No text file found at {path}')
             raise Exception(f'No text file found at {path}')
@@ -67,14 +84,22 @@ class RawTokenizer(object):
 
 class SpaceTokenizer(RawTokenizer):
     """ Creates a dictionary, tokenizes text according to space characters and returns a tensor of token ID.
-        Converts all characters to IDs and additionally, adds a <BOUNDARY> token between each line in the file. Removes banned tokens. """
+        Converts all characters to IDs, performing no padding and adding no EOS tokens. Removes banned tokens. """
 
     def __init__(self, banned_tokens=None):
+        """ Initializes the dictionary and adds a <BOUNDARY> token
+        Parameters
+        ----------
+        banned_tokens : list of str
+            A list of tokens to remove from the text.
+        """
+
         RawTokenizer.__init__(self)
         self.dictionary.add_word('<BOUNDARY>')
         self.banned_tokens = banned_tokens
 
     def remove_tokens(self, lines):
+        """ Removes banned tokens from a list of lines """
         if self.banned_tokens:
             new_lines = []
             for line in lines:
@@ -85,6 +110,18 @@ class SpaceTokenizer(RawTokenizer):
         return lines
 
     def tokenize_lines(self, lines):
+        """ Tokenizes text according to space characters and returns a tensor of token ID.
+        Parameters
+        ----------
+        lines : list of str
+            A list of lines to tokenize.
+        
+        Returns
+        -------
+        ids : torch.LongTensor
+            A tensor of token IDs.
+        """
+
         logger.info('Tokenizing text using space character, merging utterances')
         lines = [line.split() + ['<BOUNDARY>'] for line in lines]
         lines = self.remove_tokens(lines)
@@ -111,6 +148,15 @@ class TruncateTokenizer(RawTokenizer):
         truncating and adding start, end and padding tokens to each line. Converts all characters to IDs. Removes banned tokens. """
 
     def __init__(self, max_utterance_length, banned_tokens=None):
+        """ Initializes the dictionary and adds a <START> and <END> token
+        Parameters
+        ----------
+        max_utterance_length : int
+            The maximum number of tokens in an utterance.
+        banned_tokens : list of str
+            A list of tokens to remove from the text.
+        """
+
         RawTokenizer.__init__(self)
         self.max_utterance_length = max_utterance_length
         self.dictionary.add_word('<START>')
@@ -118,8 +164,20 @@ class TruncateTokenizer(RawTokenizer):
         self.banned_tokens = banned_tokens
 
     def split_and_pad_line(self, line):
-        """ Splits, pads and adds EOS to a line. Returns tokenized line and whether line was truncated.
-            Expects a space-delimited line, such as "h e l l o". Removes banned tokens. """
+        """ Splits a line into tokens and pads it to the maximum utterance length.
+        Parameters
+        ----------
+        line : str
+            The line to tokenize.
+
+        Returns
+        -------
+        tokens : list of str
+            The tokenized line.
+        truncated : bool
+            Whether the line was truncated.
+        """
+
         tokens = line.split()
         if self.banned_tokens:
             for token in self.banned_tokens:
@@ -136,6 +194,18 @@ class TruncateTokenizer(RawTokenizer):
         return tokens, truncated
 
     def tokenize_lines(self, lines):
+        """ Tokenizes text according to space characters and returns a tensor of token ID.
+        Parameters
+        ----------
+        lines : list of str
+            A list of lines to tokenize.
+
+        Returns
+        -------
+        ids : torch.LongTensor
+            A tensor of token IDs.
+        """
+
         logger.info('Tokenizing text using space character, keeping utterances separate by adding padding') 
         tokenized_lines = []
         long_utterances = 0
@@ -167,16 +237,18 @@ class TruncateTokenizer(RawTokenizer):
 
 
 class Corpus(object):
-    """ Pre-processes and stores a corpus of train, test and validation data. 
-
-    Given a path, expects to find a "train.txt", "valid.txt" and "test.txt" file at that path. 
-    For each file, tokenises each line in that file, truncating it if it exceeds the maximum
-    utterance length and padding it otherwise. Each split of the data is stored as a single
-    long tensor of token IDs.
-
-    """
+    """ Corpus class for loading and tokenizing text. """
 
     def __init__(self, path, tokenizer):
+        """ Initializes the corpus by tokenizing the text.
+        Parameters
+        ----------
+        path : str
+            The path to the text files.
+        tokenizer : Tokenizer
+            The tokenizer to use.
+        """
+
         self.dictionary = tokenizer.dictionary
         self.tokenizer = tokenizer
 
@@ -184,16 +256,36 @@ class Corpus(object):
         self.valid = self.tokenizer.tokenize(os.path.join(path, 'valid.txt'))
         self.test = self.tokenizer.tokenize(os.path.join(path, 'test.txt'))
 
-# mask subsequent entries
 def subsequent_mask(size):
-    """ Mask out subsequent positions. """
+    """ Mask out subsequent positions. 
+    Parameters
+    ----------
+    size : int
+        The size of the mask.
+        
+    Returns
+    -------
+    mask : torch.ByteTensor
+        The mask.
+    """
+
     attn_shape = (1, size, size)
     subsequent_mask = np.triu(np.ones(attn_shape), k=1).astype('uint8')
     return torch.from_numpy(subsequent_mask) == 0
 
-
 def make_std_mask(tgt):
-    """ Create a mask to hide padding and future words. """
+    """ Creates a mask to hide padding and future words.
+    Parameters
+    ----------
+    tgt : torch.LongTensor
+        The target tensor.
+
+    Returns
+    -------
+    tgt_mask : torch.ByteTensor
+        The mask.
+    """
+    
     tgt_mask = (tgt != PAD).unsqueeze(-2)
     tgt_mask = tgt_mask & subsequent_mask(tgt.size(-1)).type_as(tgt_mask)
     return tgt_mask

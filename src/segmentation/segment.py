@@ -162,7 +162,7 @@ class Segmenter(object):
                 increase_in_loss = new_loss - loss
                 loss = new_loss
 
-                new_rank = np.log2(1+token_predictions.argsort(descending=True)[token_ids[i+1]])
+                new_rank = np.log2(1+(token_predictions.argsort(descending=True) == token_ids[i+1]).nonzero(as_tuple=True)[0])
                 increase_in_rank = new_rank - rank
                 rank = new_rank
 

@@ -1,7 +1,6 @@
 __author__ = 'Zeb Goriely'
 """ Wrapper class for training and evaluating a phoneme transformer model """
 
-import typing
 import logging 
 import time 
 import os
@@ -9,7 +8,6 @@ import wandb
 
 import math
 import random
-import hashlib
 
 import numpy as np
 import torch
@@ -25,7 +23,7 @@ DEFAULT_DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 num_gpus = torch.cuda.device_count()
 
 class AverageMeter(object):
-    """Computes and stores the average and current value"""
+    """ Computes and stores the average and current value """
     def __init__(self):
         self.reset()
 
@@ -42,13 +40,15 @@ class AverageMeter(object):
         self.avg = self.sum / self.count
 
 class PhoneTransformer(object):
-    """
-    Orchestrates model loading, training and evaluation using a specific 
-    the next char transformer.
-    """
+    """ Orchestrates model loading, training and evaluation using the next char transformer. """
     
     def __init__(self, resubmit_after=None):
-        """ Initialize base model based using wandb config """
+        """ Initialize base model based using wandb config
+        Parameters
+        ----------
+        resubmit_after : int
+            Number of hours to run before resubmitting job
+        """
 
         self.setup_seed()
         self.resubmit_after = resubmit_after
@@ -66,30 +66,34 @@ class PhoneTransformer(object):
 
         # Load corpus, model and optimiser
         self.sequence_length = wandb.config.get('sequence_length')
+        self.log_interval = wandb.config.get('log_interval', 200)
+        self.clip = wandb.config.get('clip', 1.0)
         self.corpus = self.load_corpus()
         self.model = self.load_model()
         self.optimizer = self.load_optimizer()
+        self.try_resume_training()
 
-        # if num_epochs is 0 at the start of training, then we are resuming training 
+    def try_resume_training(self):
+        """ Try to resume training if a checkpoint exists """
         if self.num_epochs > 0:
+            logging.info(f'Resuming training from epoch {self.num_epochs}')
             checkpoint_file = "latest-checkpoint.pt"
         else:
             checkpoint_file = wandb.config.get('checkpoint_file', '')
+            logging.info(f'Found checkpoint file found in config: {checkpoint_file}')
 
         if checkpoint_file:
             logging.info(f'Loading in checkpoint file: {checkpoint_file}')
             checkpoint = torch.load(wandb.restore(checkpoint_file).name)
             self.model.load_state_dict(checkpoint['learner_state_dict'])
             self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-            os.rename(os.path.join(wandb.run.dir, checkpoint_file),
-                os.path.join(wandb.run.dir, "loaded_checkpoint.pt"))
+            os.rename(os.path.join(wandb.run.dir, checkpoint_file), os.path.join(wandb.run.dir, "loaded_checkpoint.pt"))  
         else:
-            logging.info('No checkpoint used - learning from scratch')
-            self.num_epochs = 0
+            logging.info('No checkpoint found - training from scratch')
 
     def setup_seed(self):
         """ Set up the seed """
-        seed = wandb.config.get('seed',-1)
+        seed = wandb.config.get('seed', -1)
         if seed < 0: 
             logging.info('Skipping seed setting for reproducibility')
             logging.info('If you would like to set a seed, set seed to a positive value in config')
@@ -105,13 +109,14 @@ class PhoneTransformer(object):
         """ Load corpus being used """
         data_dir = wandb.config.get('root_path', '')
         if not data_dir:
-            logging.exception('No training data specified.')
+            logging.exception('No training data specified')
             raise Exception('No training data specified')
 
         fn = 'corpus.{}.data'.format('.'.join(data_dir.split('/')))
         if os.path.exists(fn):
             logging.info(f'Loading cached dataset at {fn}')
             corpus = torch.load(fn)
+            return corpus
         else:
             logging.info('Producing dataset...')
             if 'text8' in data_dir:
@@ -125,6 +130,7 @@ class PhoneTransformer(object):
         return corpus
 
     def load_model(self):
+        """ Load model being used """
         logging.info('Building model...')
         vocab_size = len(self.corpus.dictionary)
         hidden_size = wandb.config.get('hidden_size', 64)
@@ -146,6 +152,7 @@ class PhoneTransformer(object):
         return model
 
     def load_optimizer(self):
+        """ Load optimizer being used """
         lr = wandb.config.get('lr', 0.003)
         momentum = wandb.config.get('momentum', 0.99)
         optimizer = optim.SGD(self.model.parameters(), lr, momentum)
@@ -166,10 +173,7 @@ class PhoneTransformer(object):
         # wandb.save(model_path, policy='now')
 
     def resubmit_job(self):
-        """
-        Submit a new slurm job to continue training. Bad practise to save a command to a file to be run later but works for now.
-        """
-
+        """ Submit a new slurm job to continue training. Bad practise to save a command to a file to be run later but works for now. """
         saved_config = os.path.join(wandb.run.dir, 'config.yaml')
         run_id = wandb.run.id
         command = f'sbatch scripts/slurm_submit.wilkes3 {saved_config} {run_id}'
@@ -188,6 +192,7 @@ class PhoneTransformer(object):
         exit(124)
 
     def log_losses(self, loss, message='', last_time=None):
+        """ Log the losses """
         logging.info('=' * 89)
         if last_time:
             message = message + ' | time: {:5.2f}s'.format(time.time() - last_time)
@@ -195,22 +200,64 @@ class PhoneTransformer(object):
             message, loss, math.exp(loss), loss / math.log(2)))
         logging.info('=' * 89)
 
+    def step(self, data_source, train=False, step=1):
+        """ Take a step in the model """
+        self.model.train() if train else self.model.eval()
+
+        # Logging information
+        current_loss = AverageMeter()
+        total_loss = AverageMeter()
+        layer_losses = [AverageMeter() for i in range(self.model.n_layers)]
+        start_time = time.time()
+
+        for batch, i in enumerate(range(0, data_source.data.size(0) - 1 - self.sequence_length, step)):
+
+            if train:
+                # For training, we sample batches randomly from the data
+                # TODO: CHECK IF KEEPING UTTERANCES SEPARATE
+                #if self.corpus.keep_utterances_separate:
+                #    i = torch.randint(low=0, high=(train_data.data.size(0) // self.sequence_length), size=(1,)).long().item() * self.sequence_length
+                # else:
+                i = torch.randint(low=0, high=(data_source.data.size(0) - self.sequence_length), size=(1,)).long().item()
+                self.optimizer.zero_grad()
+
+             # Get batch, run through model, get loss and step optimizer
+            data, target, _, target_mask = data_source.get_batch(i)
+            output = self.model(data, target_mask)
+            final_layer_loss, average_loss_of_all_layers, all_layer_losses = self.model.criterion(output, target)
+            if train:
+                average_loss_of_all_layers.backward() # Train model on all layer losses, not just final layer
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clip)
+                self.optimizer.step()
+            
+            # Logging information
+            current_loss.update(final_layer_loss.item(), data.size(0))
+            total_loss.update(final_layer_loss.item(), data.size(0))
+            for i in range(len(all_layer_losses)):
+                layer_losses[-1-i].update(all_layer_losses[-1-i].item(), data.size(0))
+
+            # Logging
+            if train and batch % self.log_interval == 0 and batch > 0:
+                avg_loss = current_loss.avg
+                elapsed = time.time() - start_time
+                logging.info('| epoch {:3d} | {:5d}/{:5d} batches | ms/batch {:5.2f} | '
+                    'loss {:5.2f} | ppl {:8.2f} | bpc {:8.3f}'.format(
+                    wandb.run.step, batch, len(data_source.data) / step,
+                    elapsed * 1000 / self.log_interval, avg_loss,
+                    math.exp(avg_loss), avg_loss / math.log(2)))
+                current_loss.reset()
+                start_time = time.time()
+
+        return total_loss.avg, [layer_loss.avg for layer_loss in layer_losses]
+  
     def __call__(self) -> None: 
-        """ 
-        Train or evaluate the model
-        """
+        """ Train or evaluate the model """
 
         ###############################################################################
         # Prepare experiment
         ###############################################################################
 
-        log_interval = wandb.config.get('log_interval', 200)
         segment_interval = wandb.config.get('segment_interval', 50)
-
-        # metric for logging training data
-        # wandb.define_metric('epoch')
-        # wandb.define_metric("train.loss", step_metric='epoch', summary='min')
-        # wandb.define_metric("valid.loss", step_metric='epoch', summary='min')
 
         ###############################################################################
         # Batch data
@@ -219,7 +266,7 @@ class PhoneTransformer(object):
         batch_size = wandb.config.get('batch_size')
         logging.info(f'Using batch_size = {batch_size}')
         eval_batch_size = batch_size
-        test_batch_size = 1
+        test_batch_size = batch_size
         train_data = data.BatchedData(self.corpus.train, batch_size, self.sequence_length, self.base_device)
         val_data = data.BatchedData(self.corpus.valid, eval_batch_size, self.sequence_length, self.base_device)
         test_data = data.BatchedData(self.corpus.test, test_batch_size, self.sequence_length, self.base_device)
@@ -231,74 +278,6 @@ class PhoneTransformer(object):
         best_val_loss = None
         epochs = wandb.config.get('epochs', 2)
 
-        # def get_segmentation_performance():
-        #     data_dir = wandb.config.get('root_path', '')
-        #     test_dir = os.path.join(data_dir, 'test.txt')
-        #     segmenter = Segmenter(self.model, test_dir, self.corpus)
-            
-        def evaluate(data_source, step=1):
-            # Turn on evaluation mode which disables dropout.
-            total_loss = AverageMeter()
-            self.model.eval()
-            with torch.no_grad():
-                # Slide a window along of size `step`. Set step=self.sequence_length to evaluate per-utterance
-                for batch, i in enumerate(range(0, data_source.data.size(0) - 1 - self.sequence_length, step)):
-                    data, target, _, target_mask = data_source.get_batch(i)
-                    output = self.model(data, target_mask)
-                    final_layer_loss, _, _ = self.model.criterion(output, target)
-                    total_loss.update(final_layer_loss.item(), data.size(0))
-            return total_loss.avg
-
-        def train():
-            # Turn on training mode which enables dropout.
-            self.model.train()
-            current_loss = AverageMeter()
-            total_loss = AverageMeter()
-            layer_losses = [AverageMeter() for i in range(self.model.n_layers)]
-            start_time = time.time()
-            for batch in range(0, train_data.data.size(0) - 1, self.sequence_length):
-
-                # For training, we sample batches randomly from the data
-                # TODO: CHECK IF KEEPING UTTERANCES SEPARATE
-                #if self.corpus.keep_utterances_separate:
-                #    i = torch.randint(low=0, high=(train_data.data.size(0) // self.sequence_length), size=(1,)).long().item() * self.sequence_length
-                # else:
-
-
-                i = torch.randint(low=0, high=(train_data.data.size(0) - self.sequence_length), size=(1,)).long().item()
-
-                # Get batch, run through model, get loss and step optimizer
-                data, target, _, target_mask = train_data.get_batch(i)
-                self.optimizer.zero_grad()
-                output = self.model(data, target_mask)
-                final_layer_loss, average_loss_of_all_layers, all_layer_losses = self.model.criterion(output, target)
-                average_loss_of_all_layers.backward() # Train model on all layer losses, not just final layer
-                self.optimizer.step()
-            
-                # Logging information
-                current_loss.update(final_layer_loss.item(), data.size(0))
-                total_loss.update(final_layer_loss.item(), data.size(0))
-                for i in range(len(all_layer_losses)):
-                    layer_losses[-1-i].update(all_layer_losses[-1-i].item(), data.size(0))
-
-                # Logging
-                if batch % log_interval == 0 and batch > 0:
-                    avg_loss = current_loss.avg
-                    elapsed = time.time() - start_time
-                    logging.info('| epoch {:3d} | {:5d}/{:5d} batches | ms/batch {:5.2f} | '
-                        'loss {:5.2f} | ppl {:8.2f} | bpc {:8.3f}'.format(
-                        epoch, batch, len(train_data.data) // self.sequence_length,
-                        elapsed * 1000 / log_interval, avg_loss,
-                        math.exp(avg_loss), avg_loss / math.log(2)))
-                    current_loss.reset()
-                    start_time = time.time()
-
-            return total_loss.avg, [layer_loss.avg for layer_loss in layer_losses]
-
-        ###############################################################################
-        # Training loop
-        ###############################################################################
-
         for epoch in range(self.num_epochs, epochs + 1):
 
             # Let the model know how far through training we are for intermediate layer losses
@@ -306,11 +285,11 @@ class PhoneTransformer(object):
             logging.info(f'Training on losses from final {self.model.num_intermediate_losses} layers')
 
             epoch_start_time = time.time()
-            train_loss, layer_losses = train()
+            train_loss, layer_losses = self.step(train_data, train=True, step=self.sequence_length)
             layer_losses = {f"layer_{i}" : layer_losses[i] for i in range(len(layer_losses))}
             self.log_losses(train_loss, 'end of epoch {:3d} | TRAIN STATS'.format(epoch), epoch_start_time)
 
-            val_loss = evaluate(val_data, step=self.sequence_length)
+            val_loss, _ = self.step(val_data, train=False, step=self.sequence_length)
             self.log_losses(val_loss, 'end of epoch {:3d} | VALID STATS'.format(epoch), epoch_start_time)
 
             # Every `segment_interval` epochs, we also check segmentation performance
@@ -348,26 +327,19 @@ class PhoneTransformer(object):
                     logging.info('Ellapsed maximum time for job, resubmitting.')
                     self.resubmit_job()
 
-
-        ###############################################################################
-        # Final cleanup
-        ###############################################################################
-
         logging.info("Finished training model")
 
-        # Load the best saved model.
+        ###############################################################################
+        # Run on test data
+        ###############################################################################
+
         best_file = os.path.join(wandb.run.dir, f"best.pt")
         logging.info(f"Loading in best model seen so far from {best_file}")
         checkpoint = torch.load(best_file)
         self.model.load_state_dict(checkpoint['learner_state_dict'], strict=False)
-
-        # Run on test data.
-        test_loss = evaluate(test_data, step=1) #self.sequence_length if self.corpus.keep_utterances_separate else 1)
-
-        # Log final loss
+        test_loss, _ = self.step(test_data, train=False, step=1)
         self.log_losses(test_loss, 'End of training | TEST STATS ')
         wandb.log({'test_loss': test_loss})
-
         if wandb.config.get('save_final_model', True):
             logging.info("Saving final model")
             self.save_checkpoint("final.pt")
