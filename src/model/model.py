@@ -1,3 +1,4 @@
+import collections
 import copy
 import torch
 import torch.nn as nn
@@ -103,6 +104,7 @@ class NextCharTransformer(nn.Module):
                 nn.init.xavier_uniform_(p)
 
         self.vocab_size = vocab_size
+        self.hidden_size = hidden_size
         self.intermediate_layer_predictions = intermediate_layer_predictions
         self.n_layers = n_layers
         self.num_intermediate_losses = n_layers if intermediate_layer_predictions else 1

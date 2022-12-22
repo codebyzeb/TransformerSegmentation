@@ -20,7 +20,6 @@ from .segmentation.segment import Segmenter
 
 
 DEFAULT_DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-num_gpus = torch.cuda.device_count()
 
 class AverageMeter(object):
     """ Computes and stores the average and current value """
@@ -345,3 +344,4 @@ class PhoneTransformer(object):
             self.save_checkpoint("final.pt")
         else:
             logging.info("Could not save final model - save_final_model set to False")
+
