@@ -1,4 +1,3 @@
-import abc
 import logging
 
 from transformers import PreTrainedModel
@@ -7,6 +6,8 @@ from transformers import PreTrainedModel
 from ..config import TransformerSegmentationConfig
 from .gpt2 import *
 from .registry import CONFIG_REGISTRY, MODEL_REGISTRY
+
+logger = logging.getLogger(__name__)
 
 
 def load_model(
@@ -34,6 +35,10 @@ def load_model(
     else:
         raise ValueError(f"Model {cfg.model.name} not found in registry")
 
-    return model
+    if cfg.model.resume_checkpoint_path:
+        model.from_pretrained(cfg.model.resume_checkpoint_path)
+        logger.info(
+            f"Loaded model from checkpoint: {cfg.model.resume_checkpoint_path}"
+        )
 
-    # TODO Implement load from checkpoint
+    return model
