@@ -136,3 +136,6 @@ dmypy.json
 machine.file.*
 corpus.*
 slurm-*
+checkpoints
+outputs
+wandb

@@ -1,0 +1,12 @@
+name: 'gpt2_lm_head_model'
+
+resume_checkpoint_path: null
+
+# kwargs for model initialization 
+num_hidden_layers: 2
+num_attention_heads: 4
+hidden_size: 64
+intermediate_size: 64
+initializer_range: 0.02  # stdev of trunc normal for initializing all weights
+layer_norm_eps: 1e-5  # 1e-5 default in fairseq (and slightly better performance), 1e-12 default in hgugingface, 
+dropout: 0.1
