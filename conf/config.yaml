@@ -16,6 +16,7 @@ experiment:
 
 data_preprocessing:
   max_input_length: 128
+  join_utts: True
 
 trainer: 
   batch_size: 128 # across 8 GPUs gives an effective batch size of 1024

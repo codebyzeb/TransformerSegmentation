@@ -10,12 +10,13 @@ dataset:
 
 experiment: 
   seed: 42 
-  dry_run: False
+  dry_run: True
   group: Debug
   name: Debug
 
 data_preprocessing:
   max_input_length: 128
+  join_utts: True
 
 trainer: 
   batch_size: 8 # across 8 GPUs gives an effective batch size of 1024

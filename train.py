@@ -62,23 +62,14 @@ def main(cfg: TransformerSegmentationConfig):
     logger.info("Preprocessing data")
 
     data_preprocessor = DataPreprocessor(cfg, tokenizer)
+
+    data_preprocessor(dataset["train"][:100])
+
     processed_dataset = dataset.map(
         data_preprocessor,
         batched=True,
         # num_proc=64,
         remove_columns=["text"],
-    )
-    # Delete special_tokens_mask column
-    if "special_tokens_mask" in processed_dataset["train"].column_names:
-        processed_dataset["train"] = processed_dataset["train"].map(
-            remove_columns=["special_tokens_mask"]
-        )
-        processed_dataset["validation"] = processed_dataset["validation"].map(
-            remove_columns=["special_tokens_mask"]
-        )
-
-    processed_dataset = processed_dataset.map(
-        lambda batch: {"labels": batch["input_ids"]}, batched=True
     )
 
     # Setting up wandb

@@ -29,7 +29,7 @@ def create_tokenizer(
     tokenizer.normalizer = normalizers.Sequence(
         [
             normalizers.Replace(";eword", ""),
-            normalizers.Replace("\n", "[UTT_BOUNDARY] "),
+            normalizers.Replace("\n", "UTT_BOUNDARY"),
             normalizers.Strip(),
         ]
     )
