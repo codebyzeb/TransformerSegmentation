@@ -10,9 +10,9 @@ dataset:
 
 experiment: 
   seed: 42 
-  dry_run: True
-  group: Test
-  name: Test
+  dry_run: False
+  group: GPT2
+  name: run_1
 
 data_preprocessing:
   max_input_length: 128
