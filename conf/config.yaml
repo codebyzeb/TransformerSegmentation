@@ -15,7 +15,7 @@ experiment:
   name: run_1
 
 data_preprocessing:
-  max_input_length: 128
+  max_input_length: 64
   join_utts: True
 
 trainer: 

@@ -47,13 +47,11 @@ class ModelParams:
     # model parameters
     name: str
 
-    num_hidden_layers: int
-    num_attention_heads: int
-    hidden_size: int
-    intermediate_size: int
-    initializer_range: float
-    layer_norm_eps: float
-    dropout: float
+    n_layer: int
+    n_head: int
+    n_embd: int
+    n_positions: int
+    n_inner: int
 
     resume_checkpoint_path: Optional[str] = None
 
