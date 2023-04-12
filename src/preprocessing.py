@@ -54,6 +54,7 @@ class DataPreprocessor(object):
                 batch["labels"].append(
                     input_ids[i : i + self.max_input_length]
                 )
+            return batch
         tokenized = self.tokenizer(
             examples["text"],
             truncation=True,

@@ -28,7 +28,7 @@ cs.store(name="base_config", node=TransformerSegmentationConfig)
 logger = logging.getLogger(__name__)
 
 
-@hydra.main(version_base=None, config_path="conf", config_name="config")
+@hydra.main(version_base=None, config_path="conf", config_name="debug")
 def main(cfg: TransformerSegmentationConfig):
     assert (
         "HF_READ_TOKEN" in os.environ and "HF_WRITE_TOKEN" in os.environ
@@ -63,13 +63,17 @@ def main(cfg: TransformerSegmentationConfig):
 
     data_preprocessor = DataPreprocessor(cfg, tokenizer)
 
-    data_preprocessor(dataset["train"][:100])
-
     processed_dataset = dataset.map(
         data_preprocessor,
         batched=True,
         # num_proc=64,
         remove_columns=["text"],
+    )
+
+    # Remove all items that are shorter than the minimum length
+    processed_dataset = processed_dataset.filter(
+        lambda x: len(x["input_ids"])
+        == cfg.data_preprocessing.max_input_length
     )
 
     # Setting up wandb
