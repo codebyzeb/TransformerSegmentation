@@ -87,6 +87,15 @@ def main(cfg: TransformerSegmentationConfig):
         wandb.config = OmegaConf.to_container(
             cfg, resolve=True, throw_on_missing=True
         )
+        # # Save config in output_dir
+        # os.makedirs(
+        #     f"checkpoints/{cfg.experiment.group}/{cfg.experiment.name}",
+        #     exist_ok=True,
+        # )
+        # OmegaConf.save(
+        #     OmegaConf.to_container(cfg, resolve=True, throw_on_missing=True),
+        #     f"checkpoints/{cfg.experiment.group}/{cfg.experiment.name}/config.yaml",
+        # )
 
     # Set up training arguments
     # TODO: If we are using wandb sweeps, note that we will need to think about how we store/
@@ -100,11 +109,14 @@ def main(cfg: TransformerSegmentationConfig):
         do_train=True,
         do_eval=True,
         do_predict=False,
+        evaluation_strategy="steps",
         per_device_train_batch_size=cfg.trainer.batch_size,  # NOTE: We can should maybe use auto_find_batch_size
         learning_rate=cfg.trainer.lr,
         max_steps=cfg.trainer.max_training_steps,
         warmup_steps=cfg.trainer.num_warmup_steps,
         seed=cfg.experiment.seed,
+        eval_steps=cfg.trainer.max_training_steps
+        // 10,  # evaluate every 10% of training
         save_steps=cfg.trainer.max_training_steps
         // 10,  # checkpoint every 10% of training
         logging_steps=cfg.trainer.max_training_steps

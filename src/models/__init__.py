@@ -35,10 +35,4 @@ def load_model(
     else:
         raise ValueError(f"Model {cfg.model.name} not found in registry")
 
-    if cfg.model.resume_checkpoint_path:
-        model.from_pretrained(cfg.model.resume_checkpoint_path)
-        logger.info(
-            f"Loaded model from checkpoint: {cfg.model.resume_checkpoint_path}"
-        )
-
     return model

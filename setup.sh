@@ -12,5 +12,5 @@ else
 fi
 source .env
 export PATH="$(pwd)/lib/bin:$PATH"
-
+git lfs install
 
