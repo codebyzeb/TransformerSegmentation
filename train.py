@@ -28,7 +28,7 @@ cs.store(name="base_config", node=TransformerSegmentationConfig)
 logger = logging.getLogger(__name__)
 
 
-@hydra.main(version_base=None, config_path="conf", config_name="debug")
+@hydra.main(version_base=None, config_path="conf", config_name="config")
 def main(cfg: TransformerSegmentationConfig):
     assert (
         "HF_READ_TOKEN" in os.environ and "HF_WRITE_TOKEN" in os.environ
