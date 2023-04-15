@@ -18,6 +18,7 @@ from src.config import TransformerSegmentationConfig
 from src.models import load_model
 from src.preprocessing import DataPreprocessor
 from src.tokenizer import load_tokenizer
+from src.trainer import CustomTrainer
 from src.utils.setup import set_seed
 
 # type-checks dynamic config file
@@ -87,15 +88,6 @@ def main(cfg: TransformerSegmentationConfig):
         wandb.config = OmegaConf.to_container(
             cfg, resolve=True, throw_on_missing=True
         )
-        # # Save config in output_dir
-        # os.makedirs(
-        #     f"checkpoints/{cfg.experiment.group}/{cfg.experiment.name}",
-        #     exist_ok=True,
-        # )
-        # OmegaConf.save(
-        #     OmegaConf.to_container(cfg, resolve=True, throw_on_missing=True),
-        #     f"checkpoints/{cfg.experiment.group}/{cfg.experiment.name}/config.yaml",
-        # )
 
     # Set up training arguments
     # TODO: If we are using wandb sweeps, note that we will need to think about how we store/
@@ -138,7 +130,8 @@ def main(cfg: TransformerSegmentationConfig):
     )
 
     # Set up trainer
-    trainer = Trainer(
+    trainer = CustomTrainer(
+        hydra_config=cfg,
         model=model,
         args=training_args,
         train_dataset=processed_dataset["train"],
