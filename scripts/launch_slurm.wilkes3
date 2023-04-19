@@ -14,13 +14,13 @@
 #! Which project should be charged (NB Wilkes2 projects end in '-GPU'):
 #SBATCH -A BUTTERY-SL3-GPU
 #! How many whole nodes should be allocated?
-#SBATCH --nodes=2
+#SBATCH --nodes=1
 #! How many (MPI) tasks will there be in total?
 #! Note probably this should not exceed the total number of GPUs in use.
-#SBATCH --ntasks=2
+#SBATCH --ntasks=1
 #! Specify the number of GPUs per node (between 1 and 4; must be 4 if nodes>1).
 #! Note that the job submission script will enforce no more than 32 cpus per GPU.
-#SBATCH --gres=gpu:4
+#SBATCH --gres=gpu:1
 
 #! How much wallclock time will be required?
 #SBATCH --time=03:00:00
@@ -91,8 +91,8 @@ cd ..
 source setup.sh
 
 srun torchrun \
---nnodes 2 \
---nproc_per_node 4 \
+--nnodes 1 \
+--nproc_per_node 1 \
 --rdzv_id $RANDOM \
 --rdzv_backend c10d \
 --rdzv_endpoint $head_node_ip:29500 \
