@@ -9,6 +9,3 @@ if [ ! -d "env" ]; then
 fi
 source env/bin/activate
 source .env
-export PATH="$(pwd)/lib/bin:$PATH"
-
-

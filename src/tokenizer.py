@@ -25,22 +25,25 @@ def create_tokenizer(
         dataset (Dataset): instantiated dataset object
     """
 
-    tokenizer = Tokenizer(models.WordLevel(unk_token="[UNK]"))
+    tokenizer = Tokenizer(models.WordLevel(unk_token="UNK"))
     tokenizer.normalizer = normalizers.Sequence(
         [
-            normalizers.Replace(";eword", ""),
+            normalizers.Replace(";eword", "WORD_BOUNDARY"),
             normalizers.Replace("\n", "UTT_BOUNDARY"),
             normalizers.Strip(),
         ]
     )
     tokenizer.pre_tokenizer = pre_tokenizers.Whitespace()
     trainer = trainers.WordLevelTrainer(
-        special_tokens=["<|endoftext|>", "[UNK]"]
+        special_tokens=["UNK", "PAD", "BOS", "EOS"]
     )
     tokenizer.train_from_iterator(dataset["train"]["text"], trainer=trainer)
 
     wrapped_tokenizer = GPT2TokenizerFast(tokenizer_object=tokenizer)
-    wrapped_tokenizer.pad_token = wrapped_tokenizer.eos_token
+    wrapped_tokenizer.bos_token = "BOS"
+    wrapped_tokenizer.eos_token = "EOS"
+    wrapped_tokenizer.pad_token = "PAD"
+    wrapped_tokenizer.unk_token = "UNK"
 
     return wrapped_tokenizer
 
