@@ -62,7 +62,7 @@ def main(cfg: TransformerSegmentationConfig):
     # Preprocess data
     logger.info("Preprocessing data")
 
-    data_preprocessor = DataPreprocessor(cfg, tokenizer)
+    data_preprocessor = DataPreprocessor(cfg.data_preprocessing, tokenizer)
 
     processed_dataset = dataset.map(
         data_preprocessor,
