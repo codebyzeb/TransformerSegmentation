@@ -3,14 +3,11 @@
 import logging
 import numpy as np
 import pandas as pd
-import scipy
 import torch
-import sys
 
-sys.path.append("../")
+from evaluate import load
+
 from torch.nn import CrossEntropyLoss
-
-from .evaluate import evaluate
 
 DEFAULT_DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -100,6 +97,8 @@ class Segmenter(object):
         for utt in self.gold_utterances:
             self.processed_utterances.append(self.process_utterance(utt))
 
+        self.metric = load("transformersegmentation/segmentation_scores")
+
     def process_utterance(self, utterance):
         """Processes an utterance into a dataframe containing each phoneme (Phoneme) and phoneme position (Pos), whether or not a phoneme is the start of a word (Starts),
         and a variety of measures of prediction uncertainty at each point in the sequence (Entropy, Increase in Entropy, Loss, Increase in Loss, Rank, Increase in Rank).
@@ -166,7 +165,12 @@ class Segmenter(object):
 
         with torch.no_grad():
             input = torch.tensor([token_ids], dtype=torch.long)
-            logits = self.model(input, labels=input).logits.detach()[0][:-1]
+            try:
+                logits = self.model(input, labels=input).logits.detach()[0][
+                    :-1
+                ]
+            except:
+                b = 0
             loss_fct = CrossEntropyLoss(reduction="none")
 
             loss = loss_fct(logits, input[0][1:]).detach().numpy()
@@ -229,7 +233,10 @@ class Segmenter(object):
                 segment_by_cutoff(utt, measure, cutoff)
                 for utt in self.processed_utterances
             ]
-            results = evaluate(segmented_utterances, self.gold_utterances)
+            results = self.metric.compute(
+                predictions=segmented_utterances,
+                references=self.gold_utterances,
+            )
             results["Cutoff"] = cutoff
             all_results.append(results)
 
@@ -262,4 +269,6 @@ class Segmenter(object):
                 measure
             )
         )
-        return evaluate(segmented_utterances, self.gold_utterances)
+        return self.metric.compute(
+            predictions=segmented_utterances, references=self.gold_utterances
+        )
