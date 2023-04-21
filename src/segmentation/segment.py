@@ -1,12 +1,11 @@
 """ Methods for segmenting utterances using a transformer model's phoneme predictions """
 
 import logging
+
 import numpy as np
 import pandas as pd
 import torch
-
 from evaluate import load
-
 from torch.nn import CrossEntropyLoss
 
 DEFAULT_DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -164,21 +163,19 @@ class Segmenter(object):
         rank = 0
 
         with torch.no_grad():
-            input = torch.tensor([token_ids], dtype=torch.long)
-            try:
-                logits = self.model(input, labels=input).logits.detach()[0][
-                    :-1
-                ]
-            except:
-                b = 0
+            input = torch.tensor([token_ids], dtype=torch.long).to(
+                DEFAULT_DEVICE
+            )
+            logits = self.model(input, labels=input).logits.detach()[0][:-1]
             loss_fct = CrossEntropyLoss(reduction="none")
 
-            loss = loss_fct(logits, input[0][1:]).detach().numpy()
+            loss = loss_fct(logits, input[0][1:]).detach().cpu().numpy()
             increase_in_loss = np.insert(loss[1:] - loss[:-1], 0, 0)
             entropy = (
                 torch.distributions.Categorical(logits=logits)
                 .entropy()
                 .detach()
+                .cpu()
                 .numpy()
             )
             increase_in_entropy = np.insert(entropy[1:] - entropy[:-1], 0, 0)
@@ -187,12 +184,16 @@ class Segmenter(object):
                 + (
                     logits.argsort(descending=True)
                     == input[0][1:].unsqueeze(1)
-                ).nonzero(as_tuple=True)[1]
+                )
+                .nonzero(as_tuple=True)[1]
+                .detach()
+                .cpu()
             )
             increase_in_rank = np.insert(rank[1:] - rank[:-1], 0, 0)
             boundary_prediction = (
                 torch.softmax(logits, dim=1)[:, self.boundary_token]
                 .detach()
+                .cpu()
                 .numpy()
             )
             increase_in_boundary_prediction = np.insert(
