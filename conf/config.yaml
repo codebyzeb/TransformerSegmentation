@@ -1,12 +1,11 @@
 defaults: 
   - base_config
   - _self_
-  - dataset: full 
-  - tokenizer: space_tokenizer
   - model: gpt2_lm
 
 dataset: 
   name: 'transformersegmentation/CHILDES_EnglishNA'
+  subconfig: 'full'
 
 experiment: 
   seed: 42 
@@ -17,6 +16,9 @@ experiment:
 data_preprocessing:
   max_input_length: 64
   join_utts: True
+
+tokenizer:
+  name: 'transformersegmentation/Space-Tokenizer' 
 
 trainer: 
   batch_size: 128 # across 8 GPUs gives an effective batch size of 1024
