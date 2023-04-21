@@ -1,0 +1,27 @@
+defaults: 
+  - base_config
+  - _self_
+  - model: gpt2_lm
+
+dataset: 
+  name: 'transformersegmentation/CHILDES_EnglishNA'
+  subconfig: 'br'
+
+experiment: 
+  seed: 42 
+  dry_run: False
+  group: GPT2-BR
+  name: run_1
+
+data_preprocessing:
+  max_input_length: 64
+  join_utts: True
+
+tokenizer:
+  name: 'transformersegmentation/BR-Tokenizer' 
+
+trainer: 
+  batch_size: 128 # across 8 GPUs gives an effective batch size of 1024
+  lr: 1e-4 # 1e-4 is used in fairseq; 1e-3 is default in huggingface
+  num_warmup_steps: 14_000
+  max_training_steps: 100_000
