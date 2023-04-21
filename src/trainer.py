@@ -1,25 +1,23 @@
 """ Main trainer class. """
 
 import logging
+import math
 import os
 import shutil
 import time
 from pathlib import Path
 
 # typing imports
-from typing import Dict, List, Optional
+from typing import List
 
-import numpy as np
-import torch
 from huggingface_hub import Repository, create_repo
 from omegaconf import OmegaConf
-from torch.utils.data import DataLoader, RandomSampler
-from torch.utils.data.distributed import DistributedSampler
-from transformers import Trainer, TrainerCallback
-from transformers.trainer_utils import HubStrategy, has_length, speed_metrics
+from transformers import Trainer
+from transformers.trainer_utils import HubStrategy, speed_metrics
 from transformers.utils import get_full_repo_name
 
 from .config import TransformerSegmentationConfig
+from .segmentation.segment import Segmenter
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +26,7 @@ class CustomTrainer(Trainer):
     def __init__(
         self,
         hydra_config: TransformerSegmentationConfig,
+        segment_eval_sentences: List[str],
         **kwargs,
     ) -> None:
         """
@@ -38,9 +37,11 @@ class CustomTrainer(Trainer):
 
         Args:
             * hydra_config: (BabyLMConfig): The config object.
+            * segment_eval_sentences: (List[str]): The sentences to evaluate segmentation on.
         """
 
         self.hydra_config = hydra_config
+        self.segment_eval_sentences = segment_eval_sentences
 
         self.experiment_group = hydra_config.experiment.group
         self.experiment_name = hydra_config.experiment.name
@@ -121,3 +122,81 @@ class CustomTrainer(Trainer):
             self.args.output_dir, f"hydra_config_{time.time()}.yaml"
         )
         OmegaConf.save(self.hydra_config, config_output_path)
+
+    # Override evaluate to do word segmentation
+    def evaluate(
+        self,
+        eval_dataset=None,
+        ignore_keys=None,
+        metric_key_prefix: str = "eval",
+    ):
+        """
+        Run evaluation and returns metrics.
+        The calling script will be responsible for providing a method to compute metrics, as they are task-dependent
+        (pass it to the init `compute_metrics` argument).
+        You can also subclass and override this method to inject custom behavior.
+        Args:
+            eval_dataset (`Dataset`, *optional*):
+                Pass a dataset if you wish to override `self.eval_dataset`. If it is a [`~datasets.Dataset`], columns
+                not accepted by the `model.forward()` method are automatically removed. It must implement the `__len__`
+                method.
+            ignore_keys (`List[str]`, *optional*):
+                A list of keys in the output of your model (if it is a dictionary) that should be ignored when
+                gathering predictions.
+            metric_key_prefix (`str`, *optional*, defaults to `"eval"`):
+                An optional prefix to be used as the metrics key prefix. For example the metrics "bleu" will be named
+                "eval_bleu" if the prefix is "eval" (default)
+        Returns:
+            A dictionary containing the evaluation loss and the potential metrics computed from the predictions. The
+            dictionary also contains the epoch number which comes from the training state.
+        """
+        # memory metrics - must set up as early as possible
+        self._memory_tracker.start()
+
+        eval_dataloader = self.get_eval_dataloader(eval_dataset)
+        start_time = time.time()
+
+        eval_loop = (
+            self.prediction_loop
+            if self.args.use_legacy_prediction_loop
+            else self.evaluation_loop
+        )
+        output = eval_loop(
+            eval_dataloader,
+            description="Evaluation",
+            prediction_loss_only=True
+            if self.compute_metrics is None
+            else None,
+            ignore_keys=ignore_keys,
+            metric_key_prefix=metric_key_prefix,
+        )
+
+        # Evaluate word segmentation on last 3000 sentences of eval dataset
+        segmenter = Segmenter(
+            self.model, self.tokenizer, self.segment_eval_sentences
+        )
+        seg_metrics = segmenter.evaluate_spike_segmentation(
+            "Entropy"
+        )  # Prepend 'seg' to each key
+        seg_metrics = {
+            f"eval_seg_entropy_{k}": v
+            for k, v in seg_metrics.items()
+            if "fscore" in k
+        }
+        output.metrics.update(seg_metrics)
+
+        total_batch_size = self.args.eval_batch_size * self.args.world_size
+        if f"{metric_key_prefix}_jit_compilation_time" in output.metrics:
+            start_time += output.metrics[
+                f"{metric_key_prefix}_jit_compilation_time"
+            ]
+        output.metrics.update(
+            speed_metrics(
+                metric_key_prefix,
+                start_time,
+                num_samples=output.num_samples,
+                num_steps=math.ceil(output.num_samples / total_batch_size),
+            )
+        )
+
+        self.log(output.metrics)

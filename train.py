@@ -10,7 +10,7 @@ import hydra
 from datasets import load_dataset
 from hydra.core.config_store import ConfigStore
 from omegaconf import OmegaConf
-from transformers import Trainer, TrainingArguments
+from transformers import TrainingArguments
 
 # wandb for logging metrics
 import wandb
@@ -62,13 +62,22 @@ def main(cfg: TransformerSegmentationConfig):
     # Preprocess data
     logger.info("Preprocessing data")
 
-    data_preprocessor = DataPreprocessor(cfg, tokenizer)
+    data_preprocessor = DataPreprocessor(cfg.data_preprocessing, tokenizer)
 
+    num_rows = dataset["validation"].num_rows
+    segment_eval_sentences = dataset["validation"].select(
+        range(num_rows - 3000, num_rows)
+    )["text"]
     processed_dataset = dataset.map(
         data_preprocessor,
         batched=True,
         # num_proc=64,
         remove_columns=["text"],
+    )
+
+    # Create labels
+    processed_dataset = processed_dataset.map(
+        lambda x: {"labels": x["input_ids"]}
     )
 
     # Remove all items that are shorter than the minimum length
@@ -126,12 +135,14 @@ def main(cfg: TransformerSegmentationConfig):
         hub_token=os.environ["HF_WRITE_TOKEN"]
         if not cfg.experiment.dry_run
         else None,
-        remove_unused_columns=False,
+        remove_unused_columns=True,
+        label_names=["input_ids"],
     )
 
     # Set up trainer
     trainer = CustomTrainer(
         hydra_config=cfg,
+        segment_eval_sentences=segment_eval_sentences,
         model=model,
         args=training_args,
         train_dataset=processed_dataset["train"],

@@ -6,7 +6,7 @@ import os
 # typing imports
 from datasets import Dataset
 from tokenizers import Tokenizer, models, normalizers, pre_tokenizers, trainers
-from transformers import GPT2TokenizerFast, PreTrainedTokenizer, AutoTokenizer
+from transformers import AutoTokenizer, GPT2TokenizerFast, PreTrainedTokenizer
 
 from .config import TransformerSegmentationConfig
 
@@ -28,7 +28,7 @@ def create_tokenizer(
     tokenizer = Tokenizer(models.WordLevel(unk_token="UNK"))
     tokenizer.normalizer = normalizers.Sequence(
         [
-            normalizers.Replace(";eword", "WORD_BOUNDARY"),
+            normalizers.Replace(";eword", "WORD_BOUNDARY "),
             normalizers.Replace("\n", "UTT_BOUNDARY"),
             normalizers.Strip(),
         ]
@@ -81,20 +81,5 @@ def load_tokenizer(
         **tokenizer_kwargs,
         use_auth_token=os.environ["HF_READ_TOKEN"],
     )
-
-    # try:
-    #     logger.info("Loading in tokenizer from hub")
-    #     tokenizer = AutoTokenizer.from_pretrained(
-    #         full_tokenizer_name,
-    #         **tokenizer_kwargs,
-    #         use_auth_token=os.environ["HF_READ_TOKEN"],
-    #     )
-    # except:
-    # logger.info("Tokenizer not found on hub, creating new tokenizer")
-    # tokenizer = create_tokenizer(cfg, dataset)
-    # logger.info(f"Pushing trained tokenizer to hub: {full_tokenizer_name}")
-    # tokenizer.push_to_hub(
-    #     full_tokenizer_name, use_auth_token=os.environ["HF_WRITE_TOKEN"]
-    # )
 
     return tokenizer
