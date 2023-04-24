@@ -26,7 +26,7 @@ class CustomTrainer(Trainer):
     def __init__(
         self,
         hydra_config: TransformerSegmentationConfig,
-        segment_eval_sentences: List[str],
+        segment_eval_sentences: List[str] = None,
         **kwargs,
     ) -> None:
         """
@@ -172,18 +172,19 @@ class CustomTrainer(Trainer):
         )
 
         # Evaluate word segmentation on last 3000 sentences of eval dataset
-        segmenter = Segmenter(
-            self.model, self.tokenizer, self.segment_eval_sentences
-        )
-        seg_metrics = segmenter.evaluate_spike_segmentation(
-            "Entropy"
-        )  # Prepend 'seg' to each key
-        seg_metrics = {
-            f"eval_seg_entropy_{k}": v
-            for k, v in seg_metrics.items()
-            if "fscore" in k
-        }
-        output.metrics.update(seg_metrics)
+        if self.segment_eval_sentences:
+            segmenter = Segmenter(
+                self.model, self.tokenizer, self.segment_eval_sentences
+            )
+            seg_metrics = segmenter.evaluate_spike_segmentation(
+                "Entropy"
+            )  # Prepend 'seg' to each key
+            seg_metrics = {
+                f"eval_seg_entropy_{k}": v
+                for k, v in seg_metrics.items()
+                if "fscore" in k
+            }
+            output.metrics.update(seg_metrics)
 
         total_batch_size = self.args.eval_batch_size * self.args.world_size
         if f"{metric_key_prefix}_jit_compilation_time" in output.metrics:

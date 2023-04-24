@@ -13,7 +13,7 @@ import numpy as np
 from datasets import load_dataset
 from hydra.core.config_store import ConfigStore
 from omegaconf import OmegaConf
-from transformers import Trainer, TrainingArguments
+from transformers import TrainingArguments
 
 # wandb for logging metrics
 import wandb
@@ -21,6 +21,7 @@ from src.config import TransformerSegmentationConfig
 from src.models.gpt2 import GPT2Probe
 from src.preprocessing import DataPreprocessor
 from src.tokenizer import load_tokenizer
+from src.trainer import CustomTrainer
 from src.utils.setup import set_seed
 
 # type-checks dynamic config file
@@ -31,7 +32,7 @@ cs.store(name="base_config", node=TransformerSegmentationConfig)
 logger = logging.getLogger(__name__)
 
 
-@hydra.main(version_base=None, config_path="conf", config_name="config")
+@hydra.main(version_base=None, config_path="conf", config_name="br")
 def main(cfg: TransformerSegmentationConfig):
     assert (
         "HF_READ_TOKEN" in os.environ and "HF_WRITE_TOKEN" in os.environ
@@ -59,7 +60,9 @@ def main(cfg: TransformerSegmentationConfig):
 
     logger.info("Loading model")
     hub_model_name = f"transformersegmentation/{cfg.experiment.group}-{cfg.model.name}-model"
-    model = GPT2Probe.from_pretrained(hub_model_name)
+    model = GPT2Probe.from_pretrained(
+        hub_model_name, revision=cfg.experiment.name
+    )
 
     logger.info("Preprocessing data")
     cfg.data_preprocessing.join_utts = False  # Always false for probe
@@ -72,7 +75,9 @@ def main(cfg: TransformerSegmentationConfig):
         remove_columns=["text"],
     ).rename_column("word_starts", "labels")
     train_dataset = (
-        processed_dataset["train"].shuffle(seed=42).select(range(10000))
+        processed_dataset["train"]
+        .shuffle(seed=42)
+        .select(range(min(10000, len(dataset["train"]))))
     )
     evaluate_dataset = (
         processed_dataset["validation"].shuffle(seed=42).select(range(1000))
@@ -130,11 +135,10 @@ def main(cfg: TransformerSegmentationConfig):
         do_train=True,
         do_eval=True,
         do_predict=False,
-        evaluation_strategy="steps",
+        evaluation_strategy="epoch",
+        logging_strategy="epoch",
         num_train_epochs=15,
         seed=cfg.experiment.seed,
-        eval_steps=100,
-        logging_steps=100,
         run_name=cfg.experiment.name,
         report_to="wandb"
         if not cfg.experiment.dry_run
@@ -152,7 +156,8 @@ def main(cfg: TransformerSegmentationConfig):
     )
 
     # Set up trainer
-    trainer = Trainer(
+    trainer = CustomTrainer(
+        hydra_config=cfg,
         model=model,
         args=training_args,
         train_dataset=train_dataset,
