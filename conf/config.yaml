@@ -4,7 +4,7 @@ defaults:
   - model: gpt2_lm
 
 dataset: 
-  name: 'transformersegmentation/CHILDES_EnglishNA'
+  name: 'transformersegmentation/CHILDES'
   subconfig: 'full'
 
 experiment: 
@@ -18,7 +18,7 @@ data_preprocessing:
   join_utts: True
 
 tokenizer:
-  name: 'transformersegmentation/Space-Tokenizer' 
+  name: 'transformersegmentation/CHILDES-Tokenizer' 
 
 trainer: 
   batch_size: 128 # across 8 GPUs gives an effective batch size of 1024
