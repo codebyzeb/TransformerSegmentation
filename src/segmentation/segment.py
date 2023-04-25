@@ -27,12 +27,12 @@ def segment_by_cutoff(utterance, measure, cutoff):
     Returns
     -------
     segmented_utterance : str
-        A space-separated string of phones with ';eword' used to indicate word boundaries.
-        E.g. 'w ʌ t ;eword dʒ ʌ s t ;eword h æ p ə n d ;eword d æ d i ;eword'.
+        A space-separated string of phones with 'WORD_BOUNDARY' used to indicate word boundaries.
+        E.g. 'w ʌ t WORD_BOUNDARY dʒ ʌ s t WORD_BOUNDARY h æ p ə n d WORD_BOUNDARY d æ d i WORD_BOUNDARY'.
     """
 
     segmented_utterance = " ".join(
-        ";eword " + p if m > cutoff else p
+        "WORD_BOUNDARY " + p if m > cutoff else p
         for p, m in zip(utterance.Phoneme, utterance[measure])
     ).strip()
     return segmented_utterance
@@ -52,15 +52,16 @@ def segment_by_spike(data, measure):
     Returns
     -------
     segmented_utterance : str
-        A space-separated string of phones with ';eword' used to indicate word boundaries.
-        E.g. 'w ʌ t ;eword dʒ ʌ s t ;eword h æ p ə n d ;eword d æ d i ;eword'.
+        A space-separated string of phones with 'WORD_BOUNDARY' used to indicate word boundaries.
+        E.g. 'w ʌ t WORD_BOUNDARY dʒ ʌ s t WORD_BOUNDARY h æ p ə n d WORD_BOUNDARY d æ d i WORD_BOUNDARY'.
     """
 
     before = np.delete(np.pad(data[measure], (1, 0)), len(data))
     after = np.delete(np.pad(data[measure], (0, 1)), 0)
     boundaries = np.logical_and(data[measure] > before, data[measure] > after)
     segmented_utterance = " ".join(
-        ";eword " + p if b else p for p, b in zip(data.Phoneme, boundaries)
+        "WORD_BOUNDARY " + p if b else p
+        for p, b in zip(data.Phoneme, boundaries)
     ).strip()
     return segmented_utterance
 
@@ -88,7 +89,13 @@ class Segmenter(object):
         self.gold_utterances = [
             line.strip()
             for line in utterances
-            if len([phone for phone in line.strip(" ") if phone != ";eword"])
+            if len(
+                [
+                    phone
+                    for phone in line.strip(" ")
+                    if phone != "WORD_BOUNDARY"
+                ]
+            )
             <= self.max_sequence_length - 1
         ]
 
@@ -104,8 +111,8 @@ class Segmenter(object):
         Parameters
         ----------
         utterance : str
-            A space-separated string of phones with ';eword' used to indicate word boundaries.
-            E.g. 'w ʌ t ;eword dʒ ʌ s t ;eword h æ p ə n d ;eword d æ d i ;eword'.
+            A space-separated string of phones with 'WORD_BOUNDARY' used to indicate word boundaries.
+            E.g. 'w ʌ t WORD_BOUNDARY dʒ ʌ s t WORD_BOUNDARY h æ p ə n d WORD_BOUNDARY d æ d i WORD_BOUNDARY'.
 
         Returns
         -------
@@ -119,7 +126,7 @@ class Segmenter(object):
         word_starts = []
         next_word = True
         for c in processed:
-            if c == ";eword":
+            if c == "WORD_BOUNDARY":
                 next_word = True
             else:
                 phonemes.append(c)

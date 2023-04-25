@@ -112,13 +112,15 @@ def main(cfg: TransformerSegmentationConfig):
             )
             predict_sentence = " ".join(
                 [
-                    ";eword " + token if predict_boundaries[k] else token
+                    "WORD_BOUNDARY " + token
+                    if predict_boundaries[k]
+                    else token
                     for k, token in enumerate(tokens)
                 ]
             ).replace("UTT_BOUNDARY", "")
             gold_sentence = " ".join(
                 [
-                    ";eword " + token if gold_boundaries[k] else token
+                    "WORD_BOUNDARY " + token if gold_boundaries[k] else token
                     for k, token in enumerate(tokens)
                 ]
             ).replace("UTT_BOUNDARY", "")

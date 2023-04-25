@@ -29,7 +29,7 @@ cs.store(name="base_config", node=TransformerSegmentationConfig)
 logger = logging.getLogger(__name__)
 
 
-@hydra.main(version_base=None, config_path="conf", config_name="br")
+@hydra.main(version_base=None, config_path="conf", config_name="config")
 def main(cfg: TransformerSegmentationConfig):
     assert (
         "HF_READ_TOKEN" in os.environ and "HF_WRITE_TOKEN" in os.environ
@@ -116,8 +116,7 @@ def main(cfg: TransformerSegmentationConfig):
         max_steps=cfg.trainer.max_training_steps,
         warmup_steps=cfg.trainer.num_warmup_steps,
         seed=cfg.experiment.seed,
-        eval_steps=cfg.trainer.max_training_steps
-        // 10,  # evaluate every 10% of training
+        eval_steps=10 // cfg.trainer.max_training_steps,  # evaluate every 10% of training
         save_steps=cfg.trainer.max_training_steps
         // 10,  # checkpoint every 10% of training
         logging_steps=cfg.trainer.max_training_steps
