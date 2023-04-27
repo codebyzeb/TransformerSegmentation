@@ -32,10 +32,7 @@ def segment_by_cutoff(utterance, measure, cutoff):
         E.g. 'w ʌ t WORD_BOUNDARY dʒ ʌ s t WORD_BOUNDARY h æ p ə n d WORD_BOUNDARY d æ d i WORD_BOUNDARY'.
     """
 
-    segmented_utterance = " ".join(
-        "WORD_BOUNDARY " + p if m > cutoff else p
-        for p, m in zip(utterance.Phoneme, utterance[measure])
-    ).strip()
+    segmented_utterance = " ".join("WORD_BOUNDARY " + p if m > cutoff else p for p, m in zip(utterance.Phoneme, utterance[measure])).strip()
     return segmented_utterance
 
 
@@ -60,10 +57,7 @@ def segment_by_spike(data, measure):
     before = np.delete(np.pad(data[measure], (1, 0)), len(data))
     after = np.delete(np.pad(data[measure], (0, 1)), 0)
     boundaries = np.logical_and(data[measure] > before, data[measure] > after)
-    segmented_utterance = " ".join(
-        "WORD_BOUNDARY " + p if b else p
-        for p, b in zip(data.Phoneme, boundaries)
-    ).strip()
+    segmented_utterance = " ".join("WORD_BOUNDARY " + p if b else p for p, b in zip(data.Phoneme, boundaries)).strip()
     return segmented_utterance
 
 
@@ -85,12 +79,7 @@ class Segmenter(object):
         self.tokenizer = tokenizer
         self.boundary_token = tokenizer.convert_tokens_to_ids(tokenizer.tokenize("UTT_BOUNDARY"))[0]
 
-        self.gold_utterances = [
-            line.strip()
-            for line in utterances
-            if len([phone for phone in line.strip(" ") if phone != "WORD_BOUNDARY"])
-            <= self.max_sequence_length - 1
-        ]
+        self.gold_utterances = [" ".join([p for p in utt.strip().split(" ") if p != ""]) for utt in utterances]
 
         self.processed_utterances = []
         for utt in self.gold_utterances:
@@ -121,6 +110,8 @@ class Segmenter(object):
         word_starts = []
         next_word = True
         for c in processed:
+            if c == " ":
+                continue
             if c == "WORD_BOUNDARY":
                 next_word = True
             else:
@@ -135,9 +126,9 @@ class Segmenter(object):
         return pd.DataFrame(data)
 
     def get_uncertainties(self, utterance):
-        """ Gets a variety of measures of prediction uncertainty at each point in the sequence,
+        """Gets a variety of measures of prediction uncertainty at each point in the sequence,
             must be implemented by subclass.
-        
+
         Parameters
         ----------
         utterance : list of str
@@ -168,10 +159,7 @@ class Segmenter(object):
 
         all_results = []
         for cutoff in cutoffs:
-            segmented_utterances = [
-                segment_by_cutoff(utt, measure, cutoff)
-                for utt in self.processed_utterances
-            ]
+            segmented_utterances = [segment_by_cutoff(utt, measure, cutoff) for utt in self.processed_utterances]
             results = self.metric.compute(
                 predictions=segmented_utterances,
                 references=self.gold_utterances,
@@ -202,11 +190,10 @@ class Segmenter(object):
 
 
 class GPT2Segmenter(Segmenter):
-
     def get_uncertainties(self, utterance):
-        """ Gets a variety of measures of prediction uncertainty at each point in the sequence,
+        """Gets a variety of measures of prediction uncertainty at each point in the sequence,
             extracted from a GPT2 model.
-        
+
         Parameters
         ----------
         utterance : list of str
@@ -228,30 +215,12 @@ class GPT2Segmenter(Segmenter):
 
             loss = loss_fct(logits, input[0][1:]).detach().cpu().numpy()
             increase_in_loss = np.insert(loss[1:] - loss[:-1], 0, 0)
-            entropy = (
-                torch.distributions.Categorical(logits=logits)
-                .entropy()
-                .detach()
-                .cpu()
-                .numpy()
-            )
+            entropy = torch.distributions.Categorical(logits=logits).entropy().detach().cpu().numpy()
             increase_in_entropy = np.insert(entropy[1:] - entropy[:-1], 0, 0)
-            rank = np.log2(
-                1 + (logits.argsort(descending=True) == input[0][1:].unsqueeze(1))
-                .nonzero(as_tuple=True)[1]
-                .detach()
-                .cpu()
-            )
+            rank = np.log2(1 + (logits.argsort(descending=True) == input[0][1:].unsqueeze(1)).nonzero(as_tuple=True)[1].detach().cpu())
             increase_in_rank = np.insert(rank[1:] - rank[:-1], 0, 0)
-            boundary_prediction = (
-                torch.softmax(logits, dim=1)[:, self.boundary_token]
-                .detach()
-                .cpu()
-                .numpy()
-            )
-            increase_in_boundary_prediction = np.insert(
-                boundary_prediction[1:] - boundary_prediction[:-1], 0, 0
-            )
+            boundary_prediction = torch.softmax(logits, dim=1)[:, self.boundary_token].detach().cpu().numpy()
+            increase_in_boundary_prediction = np.insert(boundary_prediction[1:] - boundary_prediction[:-1], 0, 0)
 
             uncertainties = {}
             uncertainties["Entropy"] = entropy
@@ -264,12 +233,13 @@ class GPT2Segmenter(Segmenter):
             uncertainties["Increase in Boundary Prediction"] = increase_in_boundary_prediction
 
         return uncertainties
-class GPT2FeaturesSegmenter(GPT2Segmenter):
 
+
+class GPT2FeaturesSegmenter(GPT2Segmenter):
     def get_uncertainties(self, utterance):
-        """ Gets a variety of measures of prediction uncertainty at each point in the sequence,
+        """Gets a variety of measures of prediction uncertainty at each point in the sequence,
             extracted from a GPT2 features model.
-        
+
         Parameters
         ----------
         utterance : list of str
@@ -290,42 +260,30 @@ class GPT2FeaturesSegmenter(GPT2Segmenter):
 
         with torch.no_grad():
             input = torch.tensor([token_ids], dtype=torch.long).to(DEFAULT_DEVICE)
-            logits = self.model(input, labels=input).logits.detach()[0, :, :-1].permute(0,2,1)
+            logits = self.model(input, labels=input).logits.detach()[0, :, :-1].permute(0, 2, 1)
             loss_fct = CrossEntropyLoss(reduction="none")
 
             # For this model, we get a loss per feature, per position
             full_loss = torch.zeros_like(logits[..., 0])
-            label_vectors = F.embedding(input[0], self.model.feature_matrix)[1:].long().T
+            label_vectors = F.embedding(input[0], self.model.feature_matrix.to(DEFAULT_DEVICE))[1:].long().T
             full_loss = loss_fct(logits, label_vectors) / self.model.feature_size
             full_loss = full_loss.detach().cpu().numpy()
             loss = full_loss.mean(axis=0)
             increase_in_loss = np.insert(loss[1:] - loss[:-1], 0, 0)
 
             # We get the average entropy for each feature across positions
-            feature_entropy = np.array([
-                torch.distributions.Categorical(logits=logits[...,i])
-                .entropy()
-                .mean()
-                .detach()
-                .cpu()
-                for i in range(logits.shape[2])
-            ])
+            feature_entropy = np.array(
+                [torch.distributions.Categorical(logits=logits[..., i]).entropy().mean().detach().cpu() for i in range(logits.shape[2])]
+            )
             increase_in_entropy = np.insert(feature_entropy[1:] - feature_entropy[:-1], 0, 0)
-            
+
             # Standard deviation of the loss
             loss_std = full_loss.std(axis=0)
             increase_in_loss_std = np.insert(loss_std[1:] - loss_std[:-1], 0, 0)
 
             # Boundary is predicted by the last feature being equal to 1
-            boundary_prediction = (
-                torch.softmax(logits, dim=1)[-1, 1]
-                .detach()
-                .cpu()
-                .numpy()
-            )
-            increase_in_boundary_prediction = np.insert(
-                boundary_prediction[1:] - boundary_prediction[:-1], 0, 0
-            )
+            boundary_prediction = torch.softmax(logits, dim=1)[-1, 1].detach().cpu().numpy()
+            increase_in_boundary_prediction = np.insert(boundary_prediction[1:] - boundary_prediction[:-1], 0, 0)
 
             uncertainties["Feature Loss"] = loss
             uncertainties["Increase in Feature Loss"] = increase_in_loss
