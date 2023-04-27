@@ -20,9 +20,7 @@ from transformers import (
     GPT2Model,
 )
 
-from transformers.modeling_outputs import (
-    CausalLMOutputWithCrossAttentions
-)
+from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
 
 ### Wrapping the GPT2 models to make them compatible with the model registry ###
 
@@ -68,11 +66,7 @@ class GPT2Probe(GPT2ForTokenClassification):
         r"""
         We override the forward pass, freezing the transformer layer but otherwise using the same code as the original
         """
-        return_dict = (
-            return_dict
-            if return_dict is not None
-            else self.config.use_return_dict
-        )
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
         # Freeze the transformer layer
         with torch.no_grad():
@@ -111,13 +105,12 @@ class GPT2Probe(GPT2ForTokenClassification):
             attentions=transformer_outputs.attentions,
         )
 
+
 # Custom Linear layer that stores the weight matrix transposed,
 # for the purpose of tieing with the output linear layer
 class CustomLinear(Linear):
-
-    def __init__(self, in_features: int, out_features: int, bias: bool = True,
-                 device=None, dtype=None) -> None:
-        factory_kwargs = {'device': device, 'dtype': dtype}
+    def __init__(self, in_features: int, out_features: int, bias: bool = True, device=None, dtype=None) -> None:
+        factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__(in_features, out_features, bias=bias, **factory_kwargs)
         self.weight = Parameter(torch.empty((in_features, out_features), **factory_kwargs))
         self.reset_parameters()
@@ -125,13 +118,23 @@ class CustomLinear(Linear):
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         return F.linear(input, self.weight.T, self.bias)
 
+
 @register_model("gpt2_feature_model", GPT2Config)
 class GPT2FeatureModel(GPT2PreTrainedModel):
-    """ 
+    """
     Implementation of GPT2LMHeadModel with feature vectors as I/O instead of vocab indices
     """
 
-    _keys_to_ignore_on_load_missing = [r"attn.masked_bias", r"attn.bias", r"lm_head.weight", r"custom_embedding.weight", r"custom_embedding.bias", r"lm_head.bias", r"embedding_norm.weight", r"embedding_norm.bias"]
+    _keys_to_ignore_on_load_missing = [
+        r"attn.masked_bias",
+        r"attn.bias",
+        r"lm_head.weight",
+        r"custom_embedding.weight",
+        r"custom_embedding.bias",
+        r"lm_head.bias",
+        r"embedding_norm.weight",
+        r"embedding_norm.bias",
+    ]
 
     def __init__(self, config, feature_map):
         """
@@ -202,7 +205,7 @@ class GPT2FeatureModel(GPT2PreTrainedModel):
             }
         )
         return model_inputs
-    
+
     def forward(
         self,
         input_ids: Optional[torch.LongTensor] = None,
@@ -228,9 +231,9 @@ class GPT2FeatureModel(GPT2PreTrainedModel):
         """
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
-        # ADDED BEHAVIOUR - Instead of passing input_ids to transformer, we map to feature vector
+        # ADDED BEHAVIOUR - Instead of passing input_ids to transformer, we map to feature vector
         if inputs_embeds is None and input_ids is not None:
-            inputs_embeds = F.embedding(input_ids, self.feature_matrix)
+            inputs_embeds = F.embedding(input_ids, self.feature_matrix.to(input_ids.device))
             # If less than 2 dimensions, unsqueeze
             if len(inputs_embeds.shape) < 3:
                 inputs_embeds = inputs_embeds.unsqueeze(dim=0)
@@ -260,13 +263,13 @@ class GPT2FeatureModel(GPT2PreTrainedModel):
             torch.cuda.set_device(self.transformer.first_device)
             hidden_states = hidden_states.to(self.lm_heads[0].weight.device)
 
-        # ADDED BEHAVIOUR - multiple lm head predict features, instead a single lm head to predict a token
+        # ADDED BEHAVIOUR - multiple lm head predict features, instead a single lm head to predict a token
         feature_logits = [lm_head(hidden_states) for lm_head in self.lm_heads]
 
         loss = None
         if labels is not None:
             loss = 0
-            label_vectors = F.embedding(labels, self.feature_matrix)
+            label_vectors = F.embedding(labels, self.feature_matrix.to(feature_logits[0].device))
             for i, logits in enumerate(feature_logits):
                 # Shift so that tokens < n predict n
                 shift_logits = logits[..., :-1, :].contiguous()
@@ -286,7 +289,7 @@ class GPT2FeatureModel(GPT2PreTrainedModel):
                 feature_probs = F.log_softmax(feature_logits[feature], dim=-1)
                 log_probs += feature_probs[:, :, feature_matrix_long[:, feature]]
             log_probs += math.log(1 / self.feature_size)
-            logits = log_probs - torch.log(1 - torch.exp(log_probs)) # Convert back to logits
+            logits = log_probs - torch.log(1 - torch.exp(log_probs))  # Convert back to logits
         else:
             logits = torch.stack(feature_logits, dim=1)
 
