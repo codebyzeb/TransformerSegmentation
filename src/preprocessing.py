@@ -23,7 +23,9 @@ UNK_FEATURE_VEC = [0] * len(FEATURES) + [2]
 MISMATCH_MAP = {'dʒ' : 'd̠ʒ',
                 'tʃ' : 't̠ʃ'}
 
-def create_phoneme_map(tokenizer, language, phoible_data_path):
+PHOIBLE_PATH = 'data/phoible.csv'
+
+def create_phoneme_map(tokenizer, language, phoible_data_path=PHOIBLE_PATH):
         """
         Creates a map from tokenizer IDs to features.
         """

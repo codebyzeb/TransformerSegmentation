@@ -57,11 +57,10 @@ def main(cfg: TransformerSegmentationConfig):
 
     # Load model
     logger.info("Initializing model")
-    model = load_model(cfg, len(tokenizer.get_vocab()))
+    model = load_model(cfg, tokenizer)
 
     # Preprocess data
     logger.info("Preprocessing data")
-
     data_preprocessor = DataPreprocessor(cfg.data_preprocessing, tokenizer)
 
     num_rows = dataset["validation"].num_rows
@@ -76,15 +75,10 @@ def main(cfg: TransformerSegmentationConfig):
     )
 
     # Create labels
-    processed_dataset = processed_dataset.map(
-        lambda x: {"labels": x["input_ids"]}
-    )
+    processed_dataset = processed_dataset.map(lambda x: {"labels": x["input_ids"]})
 
     # Remove all items that are shorter than the minimum length
-    processed_dataset = processed_dataset.filter(
-        lambda x: len(x["input_ids"])
-        == cfg.data_preprocessing.max_input_length
-    )
+    processed_dataset = processed_dataset.filter(lambda x: len(x["input_ids"]) == cfg.data_preprocessing.max_input_length)
 
     # Setting up wandb
     if cfg.experiment.dry_run:
@@ -116,7 +110,7 @@ def main(cfg: TransformerSegmentationConfig):
         max_steps=cfg.trainer.max_training_steps,
         warmup_steps=cfg.trainer.num_warmup_steps,
         seed=cfg.experiment.seed,
-        eval_steps=10,  # evaluate every 10% of training
+        eval_steps=cfg.trainer.max_training_steps // 10,  # evaluate every 10% of training
         save_steps=cfg.trainer.max_training_steps
         // 10,  # checkpoint every 10% of training
         logging_steps=cfg.trainer.max_training_steps
