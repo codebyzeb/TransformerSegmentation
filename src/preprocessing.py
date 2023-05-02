@@ -1,6 +1,5 @@
 """Class for preprocessing the data, including tokenization, etc."""
 
-import os
 import numpy as np
 import pandas as pd
 from transformers import PreTrainedTokenizer
@@ -20,9 +19,6 @@ PAD_FEATURE_VEC = [0] * len(FEATURES) + [0]
 BOUNDARY_FEATURE_VEC = [0] * len(FEATURES) + [1]
 UNK_FEATURE_VEC = [0] * len(FEATURES) + [2]
 
-MISMATCH_MAP = {'dʒ' : 'd̠ʒ',
-                'tʃ' : 't̠ʃ'}
-
 PHOIBLE_PATH = 'data/phoible.csv'
 
 def create_phoneme_map(tokenizer, language, phoible_data_path=PHOIBLE_PATH):
@@ -30,16 +26,11 @@ def create_phoneme_map(tokenizer, language, phoible_data_path=PHOIBLE_PATH):
         Creates a map from tokenizer IDs to features.
         """
         
-        # For english we also want to include american english
-        languages = ['English', 'American English'] if language == 'english' else [language]
-
-        print(os.getcwd())
         phoible = pd.read_csv(phoible_data_path)
         phoneme_map = {}
+
         for phoneme, id in tokenizer.vocab.items():
-            if phoneme in MISMATCH_MAP:
-                phoneme = MISMATCH_MAP[phoneme]
-            row = phoible[(phoible['Phoneme'] == phoneme) & (phoible['LanguageName'].isin(languages))][FEATURES]
+            row = phoible[phoible['Phoneme'] == phoneme][FEATURES]
             
             # Convert features to a vector of 0s, 1s, and 2s
             if row.shape[0] != 0:
