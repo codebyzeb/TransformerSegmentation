@@ -265,7 +265,7 @@ class GPT2FeaturesSegmenter(GPT2Segmenter):
 
             # For this model, we get a loss per feature, per position
             full_loss = torch.zeros_like(logits[..., 0])
-            label_vectors = F.embedding(input[0], self.model.feature_matrix.to(DEFAULT_DEVICE))[1:].long().T
+            label_vectors = self.model.feature_map(input[0])[1:].long().T
             full_loss = loss_fct(logits, label_vectors) / self.model.feature_size
             full_loss = full_loss.detach().cpu().numpy()
             loss = full_loss.mean(axis=0)
