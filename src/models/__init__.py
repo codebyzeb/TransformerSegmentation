@@ -33,7 +33,7 @@ def load_model(
     if cfg.model.name in MODEL_REGISTRY:
         config = CONFIG_REGISTRY[cfg.model.name](**model_kwargs)
         if cfg.model.name == 'gpt2_feature_model':
-            phoneme_map = create_phoneme_map(tokenizer, cfg.dataset.subconfig)
+            phoneme_map = create_phoneme_map(tokenizer)
             model = MODEL_REGISTRY[cfg.model.name](config, phoneme_map)
         else:
             model = MODEL_REGISTRY[cfg.model.name](config)

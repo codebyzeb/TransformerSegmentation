@@ -10,7 +10,7 @@ import hydra
 from datasets import load_dataset
 from hydra.core.config_store import ConfigStore
 from omegaconf import OmegaConf
-from transformers import TrainingArguments
+from transformers import TrainingArguments, DataCollatorForLanguageModeling
 
 # wandb for logging metrics
 import wandb
@@ -74,11 +74,11 @@ def main(cfg: TransformerSegmentationConfig):
         remove_columns=["text"],
     )
 
-    # Create labels
-    processed_dataset = processed_dataset.map(lambda x: {"labels": x["input_ids"]})
-
     # Remove all items that are shorter than the minimum length
-    processed_dataset = processed_dataset.filter(lambda x: len(x["input_ids"]) == cfg.data_preprocessing.max_input_length)
+    processed_dataset = processed_dataset.filter(lambda x: len(x["input_ids"]) <= cfg.data_preprocessing.max_input_length)
+
+    # Set up data collator
+    data_collator = DataCollatorForLanguageModeling(tokenizer, mlm=False)
 
     # Setting up wandb
     if cfg.experiment.dry_run:
@@ -135,6 +135,7 @@ def main(cfg: TransformerSegmentationConfig):
         train_dataset=processed_dataset["train"],
         eval_dataset=processed_dataset["validation"],
         tokenizer=tokenizer,
+        data_collator=data_collator,
     )
 
     # Train model

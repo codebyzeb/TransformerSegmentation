@@ -21,7 +21,7 @@ UNK_FEATURE_VEC = [0] * len(FEATURES) + [2]
 
 PHOIBLE_PATH = 'data/phoible.csv'
 
-def create_phoneme_map(tokenizer, language, phoible_data_path=PHOIBLE_PATH):
+def create_phoneme_map(tokenizer, phoible_data_path=PHOIBLE_PATH):
         """
         Creates a map from tokenizer IDs to features.
         """
@@ -92,8 +92,8 @@ class DataPreprocessor(object):
         tokenized = self.tokenizer(
             examples["text"],
             truncation=True,
-            max_length=self.max_input_length * 2,  # Since we're removing tokens, we need to insert additional pads
-            padding="max_length",
+            max_length=self.max_input_length, 
+            padding=False,
         )
 
         word_starts_list = []
@@ -108,9 +108,9 @@ class DataPreprocessor(object):
 
             # Remove the word boundary tokens and truncate
             mask = np.where(np.array(input_ids) != self.word_boundary_token)
-            tokenized["input_ids"][i] = np.array(input_ids)[mask][:self.max_input_length]
-            tokenized["attention_mask"][i] = np.array(tokenized["attention_mask"][i])[mask][:self.max_input_length]
-            word_starts_list.append(word_starts[mask][:self.max_input_length])
+            tokenized["input_ids"][i] = np.array(input_ids)[mask]
+            tokenized["attention_mask"][i] = np.array(tokenized["attention_mask"][i])[mask]
+            word_starts_list.append(word_starts[mask])
 
         batch = {
             "input_ids": tokenized["input_ids"],
