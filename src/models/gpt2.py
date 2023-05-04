@@ -2,7 +2,7 @@ import math
 from typing import Optional, Tuple, Union
 import torch
 import torch.nn.functional as F
-from torch.nn import CrossEntropyLoss, Linear, LayerNorm, MSELoss, ModuleList
+from torch.nn import CrossEntropyLoss, Linear, LayerNorm, ModuleList, Sequential, Module
 from transformers.modeling_outputs import TokenClassifierOutput
 from torch.nn.parameter import Parameter
 
@@ -118,6 +118,14 @@ class CustomLinear(Linear):
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         return F.linear(input, self.weight.T, self.bias)
 
+class FeatureMap(Module):
+    def __init__(self, feature_map, device=None, dtype=torch.float32):
+        super().__init__()
+        factory_kwargs = {"device": device, "dtype": dtype}
+        self.weight = torch.nn.Parameter(torch.tensor([feature_map[i] for i in range(len(feature_map))], **factory_kwargs), requires_grad=False)
+        
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        return F.embedding(input, self.weight)
 
 @register_model("gpt2_feature_model", GPT2Config)
 class GPT2FeatureModel(GPT2PreTrainedModel):
@@ -136,7 +144,7 @@ class GPT2FeatureModel(GPT2PreTrainedModel):
         r"embedding_norm.bias",
     ]
 
-    def __init__(self, config, feature_map):
+    def __init__(self, config, feature_map=None):
         """
         Args:
             config: GPT2Config object
@@ -144,30 +152,35 @@ class GPT2FeatureModel(GPT2PreTrainedModel):
         """
         super().__init__(config)
 
-        self.feature_matrix = torch.tensor([feature_map[i] for i in feature_map.keys()], dtype=torch.float32)
-        self.vocab_size = self.feature_matrix.shape[0]
-        self.feature_size = self.feature_matrix.shape[1]
+        self.vocab_size = config.vocab_size
+
+        # Used to flip the output logits of forward() back to vocab indices for the purpose of generation
         self.return_token_logits = False
 
-        # Embedding layer - map from feature vector to embedding
-        self.custom_embedding = CustomLinear(self.feature_size, config.n_embd)
-        self.embedding_norm = LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
+        # Feature map should be provided when initialising, but when reloading from checkpoint
+        # we need to set it to None and it'll be initialised from the checkpoint
+        if feature_map is None:
+            feature_map = {i: [0]*39 for i in range(config.vocab_size)}
+        
+        # Feature Map layer - maps from token ids to feature vectors. Doesn't update during training.
+        self.feature_map = FeatureMap(feature_map)
+        self.feature_size = self.feature_map.weight.shape[1]
+
+        # Embedding layer - map from feature vector to embedding with layer norm
+        self.custom_embedding = Sequential(
+            CustomLinear(self.feature_size, config.n_embd),
+            LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
+        )
 
         # Transformer unchanged
         self.transformer = GPT2Model(config)
 
         # Instead of mapping to vocab, we have a prediction head for each feature
-        self.lm_heads = ModuleList([Linear(config.n_embd, 3, bias=True) for _ in range(self.feature_size)])
+        self.lm_heads = ModuleList([Linear(config.n_embd, 3, bias=False) for _ in range(self.feature_size)])
 
         self.model_parallel = False
         self.device_map = None
         self.post_init()
-
-    # def get_output_embeddings(self):
-    #     return self.lm_head
-
-    # def set_output_embeddings(self, new_embeddings):
-    #     self.lm_head = new_embeddings
 
     def prepare_inputs_for_generation(self, input_ids, past_key_values=None, inputs_embeds=None, **kwargs):
         token_type_ids = kwargs.get("token_type_ids", None)
@@ -233,12 +246,11 @@ class GPT2FeatureModel(GPT2PreTrainedModel):
 
         # ADDED BEHAVIOUR - Instead of passing input_ids to transformer, we map to feature vector
         if inputs_embeds is None and input_ids is not None:
-            inputs_embeds = F.embedding(input_ids, self.feature_matrix.to(input_ids.device))
+            inputs_embeds = self.feature_map(input_ids)
+            inputs_embeds = self.custom_embedding(inputs_embeds)
             # If less than 2 dimensions, unsqueeze
             if len(inputs_embeds.shape) < 3:
                 inputs_embeds = inputs_embeds.unsqueeze(dim=0)
-            inputs_embeds = self.custom_embedding(inputs_embeds)
-            inputs_embeds = self.embedding_norm(inputs_embeds)
             input_ids = None
 
         transformer_outputs = self.transformer(
@@ -269,7 +281,7 @@ class GPT2FeatureModel(GPT2PreTrainedModel):
         loss = None
         if labels is not None:
             loss = 0
-            label_vectors = F.embedding(labels, self.feature_matrix.to(feature_logits[0].device))
+            label_vectors = self.feature_map(labels)
             for i, logits in enumerate(feature_logits):
                 # Shift so that tokens < n predict n
                 shift_logits = logits[..., :-1, :].contiguous()
@@ -284,7 +296,7 @@ class GPT2FeatureModel(GPT2PreTrainedModel):
             shape = list(feature_logits[0].shape)
             shape[-1] = self.vocab_size
             log_probs = torch.zeros(shape, device=feature_logits[0].device)
-            feature_matrix_long = self.feature_matrix.long()
+            feature_matrix_long = self.feature_map.weight.long()
             for feature in range(self.feature_size):
                 feature_probs = F.log_softmax(feature_logits[feature], dim=-1)
                 log_probs += feature_probs[:, :, feature_matrix_long[:, feature]]
