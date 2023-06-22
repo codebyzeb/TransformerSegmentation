@@ -125,7 +125,11 @@ class FeatureMap(Module):
         self.weight = torch.nn.Parameter(torch.tensor([feature_map[i] for i in range(len(feature_map))], **factory_kwargs), requires_grad=False)
         
     def forward(self, input: torch.Tensor) -> torch.Tensor:
-        return F.embedding(input, self.weight)
+        ignore = input == -100
+        input[ignore] = 0
+        output = F.embedding(input, self.weight)
+        output[ignore] = torch.zeros(self.weight.shape[-1]) - 100
+        return output
 
 @register_model("gpt2_feature_model", GPT2Config)
 class GPT2FeatureModel(GPT2PreTrainedModel):
