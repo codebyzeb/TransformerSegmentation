@@ -260,12 +260,12 @@ class GPT2FeaturesSegmenter(GPT2Segmenter):
 
         with torch.no_grad():
             input = torch.tensor([token_ids], dtype=torch.long).to(DEFAULT_DEVICE)
-            logits = self.model(input, labels=input).logits.detach()[0, :, :-1].permute(0, 2, 1)
+            logits = self.model(input, labels=input).logits.detach()[0, :-1,...].permute(1, 2, 0)
             loss_fct = CrossEntropyLoss(reduction="none")
 
             # For this model, we get a loss per feature, per position
             full_loss = torch.zeros_like(logits[..., 0])
-            label_vectors = self.model.feature_map(input[0])[1:].long().T
+            label_vectors = self.model.feature_map.as_indices(input[0])[1:].long().T
             full_loss = loss_fct(logits, label_vectors) / self.model.feature_size
             full_loss = full_loss.detach().cpu().numpy()
             loss = full_loss.mean(axis=0)
