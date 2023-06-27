@@ -1,7 +1,5 @@
 name: 'gpt2_lm_head_model'
 
-resume_checkpoint_path: null
-
 # kwargs for model initialization 
 n_layer: 2 # Number of layers. Default for GPT-2 is 12
 n_head: 4 # Number of attention heads. Default for GPT-2 is 12

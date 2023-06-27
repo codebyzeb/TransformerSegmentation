@@ -17,8 +17,18 @@ class ExperimentParams:
     # analogous to 'project' in wandb
     group: str = MISSING
 
-    # whether to run the experiment only locally
+    # whether to run a minimal version of the experiment
     dry_run: bool = False
+
+    # whether to run the experiment only offline
+    offline_run: bool = False
+
+    # Optional checkpoint path to resume training from
+    resume_checkpoint_path: Optional[str] = None
+
+    # If resume_checkpoint_path is not None and we are logging to wandb,
+    # we need to specify the run_id of the run we are resuming from
+    resume_run_id: Optional[str] = None
 
 
 @dataclass
@@ -52,8 +62,6 @@ class ModelParams:
     n_embd: int
     n_positions: int
     n_inner: int
-
-    resume_checkpoint_path: Optional[str] = None
 
 
 @dataclass

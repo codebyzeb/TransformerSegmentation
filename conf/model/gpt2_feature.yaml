@@ -1,4 +1,4 @@
-name: 'gpt2_lm_head_model'
+name: 'gpt2_feature_model'
 
 # kwargs for model initialization 
 n_layer: 8 # Number of layers. Default for GPT-2 is 12
