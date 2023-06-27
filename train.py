@@ -2,6 +2,7 @@
 
 import logging
 import os
+import torch
 
 # config-related imports
 import hydra
@@ -28,6 +29,10 @@ cs.store(name="base_config", node=TransformerSegmentationConfig)
 # A logger for this file
 logger = logging.getLogger(__name__)
 
+DRY_RUN_SUBSAMPLE_FACTOR = 1000 // (10 if torch.cuda.device_count() > 1 else 1)
+DRY_RUN_TRAIN_STEPS = 100
+DRY_RUN_WARMUP_STEPS = 10
+
 
 @hydra.main(version_base=None, config_path="conf", config_name="config")
 def main(cfg: TransformerSegmentationConfig):
@@ -44,6 +49,13 @@ def main(cfg: TransformerSegmentationConfig):
     # Set seed
     set_seed(cfg.experiment.seed)
 
+    if cfg.experiment.dry_run:
+        logger.info("Running in dry run mode -- overriding config with values: ")
+        logger.info(f"\t max_training_steps: {DRY_RUN_TRAIN_STEPS}")
+        logger.info(f"\t num_warmup_steps: {DRY_RUN_WARMUP_STEPS}")
+        cfg.trainer.max_training_steps = DRY_RUN_TRAIN_STEPS
+        cfg.trainer.num_warmup_steps = DRY_RUN_WARMUP_STEPS
+
     # Loading dataset
     logger.info("Loading dataset")
     dataset = load_dataset(
@@ -59,14 +71,14 @@ def main(cfg: TransformerSegmentationConfig):
     logger.info("Initializing model")
     model = load_model(cfg, tokenizer)
 
+    # Get a sample of the validation set for evaluation
+    num_rows = dataset["validation"].num_rows
+    segment_eval_sentences = dataset["validation"].select(range(num_rows - 3000, num_rows))["text"]
+
     # Preprocess data
     logger.info("Preprocessing data")
     data_preprocessor = DataPreprocessor(cfg.data_preprocessing, tokenizer)
 
-    num_rows = dataset["validation"].num_rows
-    segment_eval_sentences = dataset["validation"].select(
-        range(num_rows - 3000, num_rows)
-    )["text"]
     processed_dataset = dataset.map(
         data_preprocessor,
         batched=True,
@@ -77,19 +89,37 @@ def main(cfg: TransformerSegmentationConfig):
     # Remove all items that are shorter than the minimum length
     processed_dataset = processed_dataset.filter(lambda x: len(x["input_ids"]) <= cfg.data_preprocessing.max_input_length)
 
+    train_dataset = processed_dataset["train"]
+    eval_dataset = processed_dataset["validation"]
+    if cfg.experiment.dry_run:
+        logger.info(f"Running in dry run mode -- subsampling dataset by {DRY_RUN_SUBSAMPLE_FACTOR}x")
+        train_dataset = train_dataset.select(range(0, train_dataset.num_rows, DRY_RUN_SUBSAMPLE_FACTOR))
+
     # Set up data collator
     data_collator = DataCollatorForLanguageModeling(tokenizer, mlm=False)
 
     # Setting up wandb
-    if cfg.experiment.dry_run:
+    if cfg.experiment.offline_run:
         os.environ["WANDB_DISABLED"] = "true"
         os.environ["WANDB_MODE"] = "disabled"
     else:
         # These environment variables get picked up by Trainer
         os.environ["WANDB_PROJECT"] = cfg.experiment.group
         os.environ["WANDB_ENTITY"] = "zeb"
-        wandb.config = OmegaConf.to_container(
-            cfg, resolve=True, throw_on_missing=True
+        wandb.config = OmegaConf.to_container(cfg, resolve=True, throw_on_missing=True)
+        if cfg.experiment.resume_checkpoint_path:
+            resume_run_id = cfg.experiment.resume_run_id
+            if resume_run_id is None:
+                raise RuntimeError("resume_run_id must be set if resume_checkpoint_path is set")
+            os.environ["WANDB_RUN_ID"] = resume_run_id
+            os.environ["WANDB_RESUME"] = "allow"
+        wandb.init(
+            entity="zeb",
+            project=cfg.experiment.group,
+            name=cfg.experiment.name,
+            config=wandb.config,
+            resume="allow",
+            id=cfg.experiment.resume_run_id,
         )
 
     training_args = TrainingArguments(
@@ -104,24 +134,16 @@ def main(cfg: TransformerSegmentationConfig):
         max_steps=cfg.trainer.max_training_steps,
         warmup_steps=cfg.trainer.num_warmup_steps,
         seed=cfg.experiment.seed,
-        eval_steps=cfg.trainer.max_training_steps // 100,  # evaluate every 1% of training
-        save_steps=cfg.trainer.max_training_steps
-        // 10,  # checkpoint every 10% of training
-        logging_steps=cfg.trainer.max_training_steps
-        // 100,  # log every 1% of training
+        eval_steps=cfg.trainer.max_training_steps // (2 if cfg.experiment.dry_run else 100),  # evaluate every 1% of training
+        save_steps=cfg.trainer.max_training_steps // (2 if cfg.experiment.dry_run else 10),  # checkpoint every 10% of training
+        logging_steps=cfg.trainer.max_training_steps // 100,  # log every 1% of training
         run_name=cfg.experiment.name,
-        report_to="wandb"
-        if not cfg.experiment.dry_run
-        else None,  # wandb deactivated for dry runs
-        save_strategy="no" if cfg.experiment.dry_run else "steps",
+        report_to="wandb" if not cfg.experiment.offline_run else None,  # wandb deactivated for dry runs
+        save_strategy="steps",
         hub_strategy="every_save",
-        push_to_hub=not cfg.experiment.dry_run,
-        hub_model_id=f"transformersegmentation/{cfg.experiment.group}-{cfg.model.name}-model"
-        if not cfg.experiment.dry_run
-        else None,
-        hub_token=os.environ["HF_WRITE_TOKEN"]
-        if not cfg.experiment.dry_run
-        else None,
+        push_to_hub=not cfg.experiment.offline_run,
+        hub_model_id=f"transformersegmentation/{cfg.experiment.group}-{cfg.model.name}-model" if not cfg.experiment.offline_run else None,
+        hub_token=os.environ["HF_WRITE_TOKEN"] if not cfg.experiment.offline_run else None,
         remove_unused_columns=True,
         label_names=["input_ids"],
     )
@@ -132,14 +154,14 @@ def main(cfg: TransformerSegmentationConfig):
         segment_eval_sentences=segment_eval_sentences,
         model=model,
         args=training_args,
-        train_dataset=processed_dataset["train"],
-        eval_dataset=processed_dataset["validation"],
+        train_dataset=train_dataset,
+        eval_dataset=eval_dataset,
         tokenizer=tokenizer,
         data_collator=data_collator,
     )
 
     # Train model
-    trainer.train(resume_from_checkpoint=cfg.model.resume_checkpoint_path)
+    trainer.train(resume_from_checkpoint=cfg.experiment.resume_checkpoint_path)
 
 
 if __name__ == "__main__":
