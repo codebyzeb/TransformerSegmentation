@@ -348,6 +348,8 @@ class GPT2FeatureModel(GPT2PreTrainedModel):
             log_probs -= torch.logsumexp(log_probs, dim=-1, keepdim=True)
             # Convert back to logits
             logits = log_probs - torch.log(1 - torch.exp(log_probs))
+            # Ensure infs are converted to finite numbers
+            logits = logits.masked_fill(torch.isinf(logits), -1e10)
         else:
             logits = lm_logits
 
