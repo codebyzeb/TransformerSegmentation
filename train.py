@@ -116,7 +116,7 @@ def main(cfg: TransformerSegmentationConfig):
         max_steps=cfg.trainer.max_training_steps,
         warmup_steps=cfg.trainer.num_warmup_steps,
         seed=cfg.experiment.seed,
-        eval_steps=10 // cfg.trainer.max_training_steps,  # evaluate every 10% of training
+        eval_steps=10,  # evaluate every 10% of training
         save_steps=cfg.trainer.max_training_steps
         // 10,  # checkpoint every 10% of training
         logging_steps=cfg.trainer.max_training_steps
