@@ -7,6 +7,7 @@ import pandas as pd
 import torch
 from evaluate import load
 from torch.nn import CrossEntropyLoss
+import torch.nn.functional as F
 
 DEFAULT_DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -82,26 +83,20 @@ class Segmenter(object):
         self.max_sequence_length = 128
         self.model = model
         self.tokenizer = tokenizer
-        self.boundary_token = tokenizer.convert_tokens_to_ids(
-            tokenizer.tokenize("UTT_BOUNDARY")
-        )[0]
+        self.boundary_token = tokenizer.convert_tokens_to_ids(tokenizer.tokenize("UTT_BOUNDARY"))[0]
 
         self.gold_utterances = [
             line.strip()
             for line in utterances
-            if len(
-                [
-                    phone
-                    for phone in line.strip(" ")
-                    if phone != "WORD_BOUNDARY"
-                ]
-            )
+            if len([phone for phone in line.strip(" ") if phone != "WORD_BOUNDARY"])
             <= self.max_sequence_length - 1
         ]
 
         self.processed_utterances = []
         for utt in self.gold_utterances:
             self.processed_utterances.append(self.process_utterance(utt))
+
+        self.measures = self.processed_utterances[0].columns[:-3].tolist()
 
         self.metric = load("transformersegmentation/segmentation_scores")
 
@@ -140,7 +135,9 @@ class Segmenter(object):
         return pd.DataFrame(data)
 
     def get_uncertainties(self, utterance):
-        """Gets a variety of measures of prediction uncertainty at each point in the sequence.
+        """ Gets a variety of measures of prediction uncertainty at each point in the sequence,
+            must be implemented by subclass.
+        
         Parameters
         ----------
         utterance : list of str
@@ -152,73 +149,7 @@ class Segmenter(object):
             A dictionary containing a variety of measures of prediction uncertainty at each point in the sequence.
         """
 
-        # Token id tensor
-        token_ids = self.tokenizer.convert_tokens_to_ids(utterance)
-        uncertainties = {
-            "Entropy": [],
-            "Increase in Entropy": [],
-            "Loss": [],
-            "Increase in Loss": [],
-            "Rank": [],
-            "Increase in Rank": [],
-            "Boundary Prediction": [],
-            "Increase in Boundary Prediction": [],
-        }
-        entropy = 0
-        boundary_prediction = 0
-        loss = 0
-        rank = 0
-
-        with torch.no_grad():
-            input = torch.tensor([token_ids], dtype=torch.long).to(
-                DEFAULT_DEVICE
-            )
-            logits = self.model(input, labels=input).logits.detach()[0][:-1]
-            loss_fct = CrossEntropyLoss(reduction="none")
-
-            loss = loss_fct(logits, input[0][1:]).detach().cpu().numpy()
-            increase_in_loss = np.insert(loss[1:] - loss[:-1], 0, 0)
-            entropy = (
-                torch.distributions.Categorical(logits=logits)
-                .entropy()
-                .detach()
-                .cpu()
-                .numpy()
-            )
-            increase_in_entropy = np.insert(entropy[1:] - entropy[:-1], 0, 0)
-            rank = np.log2(
-                1
-                + (
-                    logits.argsort(descending=True)
-                    == input[0][1:].unsqueeze(1)
-                )
-                .nonzero(as_tuple=True)[1]
-                .detach()
-                .cpu()
-            )
-            increase_in_rank = np.insert(rank[1:] - rank[:-1], 0, 0)
-            boundary_prediction = (
-                torch.softmax(logits, dim=1)[:, self.boundary_token]
-                .detach()
-                .cpu()
-                .numpy()
-            )
-            increase_in_boundary_prediction = np.insert(
-                boundary_prediction[1:] - boundary_prediction[:-1], 0, 0
-            )
-
-            uncertainties["Entropy"] = entropy
-            uncertainties["Increase in Entropy"] = increase_in_entropy
-            uncertainties["Loss"] = loss
-            uncertainties["Increase in Loss"] = increase_in_loss
-            uncertainties["Rank"] = rank
-            uncertainties["Increase in Rank"] = increase_in_rank
-            uncertainties["Boundary Prediction"] = boundary_prediction
-            uncertainties[
-                "Increase in Boundary Prediction"
-            ] = increase_in_boundary_prediction
-
-        return uncertainties
+        raise NotImplementedError
 
     def evaluate_cutoff_segmentation(self, measure, cutoffs):
         """Given a measure and a range of cutoffs, segments according to the cutoff and evaluates the results.
@@ -248,11 +179,7 @@ class Segmenter(object):
             results["Cutoff"] = cutoff
             all_results.append(results)
 
-        logging.info(
-            "Segmented utterances for a range of cutoffs using measure: {}".format(
-                measure
-            )
-        )
+        logging.info("Segmented utterances for a range of cutoffs using measure: {}".format(measure))
         return pd.DataFrame(all_results)
 
     def evaluate_spike_segmentation(self, measure):
@@ -268,15 +195,147 @@ class Segmenter(object):
             A dataframe containing the results of segmentation.
         """
 
-        segmented_utterances = [
-            segment_by_spike(utt, measure) for utt in self.processed_utterances
-        ]
+        segmented_utterances = [segment_by_spike(utt, measure) for utt in self.processed_utterances]
 
-        logging.info(
-            "Segmented utterances according to spikes in measure: {}".format(
-                measure
+        logging.info("Segmented utterances according to spikes in measure: {}".format(measure))
+        return self.metric.compute(predictions=segmented_utterances, references=self.gold_utterances)
+
+
+class GPT2Segmenter(Segmenter):
+
+    def get_uncertainties(self, utterance):
+        """ Gets a variety of measures of prediction uncertainty at each point in the sequence,
+            extracted from a GPT2 model.
+        
+        Parameters
+        ----------
+        utterance : list of str
+            A list of phones.
+
+        Returns
+        -------
+        uncertainties : dict
+            A dictionary containing a variety of measures of prediction uncertainty at each point in the sequence.
+        """
+
+        # Token id tensor
+        token_ids = self.tokenizer.convert_tokens_to_ids(utterance)
+
+        with torch.no_grad():
+            input = torch.tensor([token_ids], dtype=torch.long).to(DEFAULT_DEVICE)
+            logits = self.model(input, labels=input).logits.detach()[0][:-1]
+            loss_fct = CrossEntropyLoss(reduction="none")
+
+            loss = loss_fct(logits, input[0][1:]).detach().cpu().numpy()
+            increase_in_loss = np.insert(loss[1:] - loss[:-1], 0, 0)
+            entropy = (
+                torch.distributions.Categorical(logits=logits)
+                .entropy()
+                .detach()
+                .cpu()
+                .numpy()
             )
-        )
-        return self.metric.compute(
-            predictions=segmented_utterances, references=self.gold_utterances
-        )
+            increase_in_entropy = np.insert(entropy[1:] - entropy[:-1], 0, 0)
+            rank = np.log2(
+                1 + (logits.argsort(descending=True) == input[0][1:].unsqueeze(1))
+                .nonzero(as_tuple=True)[1]
+                .detach()
+                .cpu()
+            )
+            increase_in_rank = np.insert(rank[1:] - rank[:-1], 0, 0)
+            boundary_prediction = (
+                torch.softmax(logits, dim=1)[:, self.boundary_token]
+                .detach()
+                .cpu()
+                .numpy()
+            )
+            increase_in_boundary_prediction = np.insert(
+                boundary_prediction[1:] - boundary_prediction[:-1], 0, 0
+            )
+
+            uncertainties = {}
+            uncertainties["Entropy"] = entropy
+            uncertainties["Increase in Entropy"] = increase_in_entropy
+            uncertainties["Loss"] = loss
+            uncertainties["Increase in Loss"] = increase_in_loss
+            uncertainties["Rank"] = rank
+            uncertainties["Increase in Rank"] = increase_in_rank
+            uncertainties["Boundary Prediction"] = boundary_prediction
+            uncertainties["Increase in Boundary Prediction"] = increase_in_boundary_prediction
+
+        return uncertainties
+class GPT2FeaturesSegmenter(GPT2Segmenter):
+
+    def get_uncertainties(self, utterance):
+        """ Gets a variety of measures of prediction uncertainty at each point in the sequence,
+            extracted from a GPT2 features model.
+        
+        Parameters
+        ----------
+        utterance : list of str
+            A list of phones.
+
+        Returns
+        -------
+        uncertainties : dict
+            A dictionary containing a variety of measures of prediction uncertainty at each point in the sequence.
+        """
+
+        # Token id tensor
+        token_ids = self.tokenizer.convert_tokens_to_ids(utterance)
+        return_token_logits_tmp = self.model.return_token_logits
+        self.model.return_token_logits = True
+        uncertainties = super().get_uncertainties(utterance)
+        self.model.return_token_logits = False
+
+        with torch.no_grad():
+            input = torch.tensor([token_ids], dtype=torch.long).to(DEFAULT_DEVICE)
+            logits = self.model(input, labels=input).logits.detach()[0, :, :-1].permute(0,2,1)
+            loss_fct = CrossEntropyLoss(reduction="none")
+
+            # For this model, we get a loss per feature, per position
+            full_loss = torch.zeros_like(logits[..., 0])
+            label_vectors = F.embedding(input[0], self.model.feature_matrix)[1:].long().T
+            full_loss = loss_fct(logits, label_vectors) / self.model.feature_size
+            full_loss = full_loss.detach().cpu().numpy()
+            loss = full_loss.mean(axis=0)
+            increase_in_loss = np.insert(loss[1:] - loss[:-1], 0, 0)
+
+            # We get the average entropy for each feature across positions
+            feature_entropy = np.array([
+                torch.distributions.Categorical(logits=logits[...,i])
+                .entropy()
+                .mean()
+                .detach()
+                .cpu()
+                for i in range(logits.shape[2])
+            ])
+            increase_in_entropy = np.insert(feature_entropy[1:] - feature_entropy[:-1], 0, 0)
+            
+            # Standard deviation of the loss
+            loss_std = full_loss.std(axis=0)
+            increase_in_loss_std = np.insert(loss_std[1:] - loss_std[:-1], 0, 0)
+
+            # Boundary is predicted by the last feature being equal to 1
+            boundary_prediction = (
+                torch.softmax(logits, dim=1)[-1, 1]
+                .detach()
+                .cpu()
+                .numpy()
+            )
+            increase_in_boundary_prediction = np.insert(
+                boundary_prediction[1:] - boundary_prediction[:-1], 0, 0
+            )
+
+            uncertainties["Feature Loss"] = loss
+            uncertainties["Increase in Feature Loss"] = increase_in_loss
+            uncertainties["Feature Entropy"] = feature_entropy
+            uncertainties["Increase in Feature Entropy"] = increase_in_entropy
+            uncertainties["Loss Deviation"] = loss_std
+            uncertainties["Increase in Loss Deviation"] = increase_in_loss_std
+            uncertainties["Boundary Feature Prediction"] = boundary_prediction
+            uncertainties["Increase in Boundary Feature Prediction"] = increase_in_boundary_prediction
+
+        self.model.return_token_logits = return_token_logits_tmp
+
+        return uncertainties
