@@ -11,11 +11,12 @@ import hydra
 from datasets import load_dataset
 from hydra.core.config_store import ConfigStore
 from omegaconf import OmegaConf
-from transformers import TrainingArguments, DataCollatorForLanguageModeling
+from transformers import TrainingArguments
 
 # wandb for logging metrics
 import wandb
 from src.config import TransformerSegmentationConfig
+from src.datacollator import CustomDataCollatorForLanguageModeling
 from src.models import load_model
 from src.preprocessing import DataPreprocessor
 from src.tokenizer import load_tokenizer
@@ -29,7 +30,7 @@ cs.store(name="base_config", node=TransformerSegmentationConfig)
 # A logger for this file
 logger = logging.getLogger(__name__)
 
-DRY_RUN_SUBSAMPLE_FACTOR = 1000 // (10 if torch.cuda.device_count() > 1 else 1)
+DRY_RUN_SUBSAMPLE_FACTOR = 10 // (10 if torch.cuda.device_count() > 1 else 1)
 DRY_RUN_TRAIN_STEPS = 100
 DRY_RUN_WARMUP_STEPS = 10
 
@@ -95,8 +96,8 @@ def main(cfg: TransformerSegmentationConfig):
         logger.info(f"Running in dry run mode -- subsampling dataset by {DRY_RUN_SUBSAMPLE_FACTOR}x")
         train_dataset = train_dataset.select(range(0, train_dataset.num_rows, DRY_RUN_SUBSAMPLE_FACTOR))
 
-    # Set up data collator
-    data_collator = DataCollatorForLanguageModeling(tokenizer, mlm=False)
+    # Set up custom data collator which joins examples to fill the context size
+    data_collator = CustomDataCollatorForLanguageModeling(tokenizer, max_seq_length=cfg.data_preprocessing.max_input_length, mlm=False)
 
     # Setting up wandb
     if cfg.experiment.offline_run:

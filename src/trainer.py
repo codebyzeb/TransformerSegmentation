@@ -8,16 +8,18 @@ import time
 from pathlib import Path
 
 # typing imports
-from typing import List
+from typing import List, Optional
 
 from huggingface_hub import Repository, create_repo
 from omegaconf import OmegaConf
-from transformers import Trainer
-from transformers.trainer_utils import HubStrategy, speed_metrics
-from transformers.utils import get_full_repo_name
+from torch.utils.data import DataLoader, Dataset
+from transformers.trainer import Trainer
+from transformers.trainer_utils import HubStrategy, speed_metrics, seed_worker
+from transformers.utils import get_full_repo_name, is_datasets_available
 
 from .config import TransformerSegmentationConfig
 from .segmentation.segment import GPT2FeaturesSegmenter, GPT2Segmenter
+from .datasampler import CustomBatchSampler
 
 SEGMENTER_MAP = {
     "GPT2LMHeadModel": GPT2Segmenter,
@@ -46,6 +48,7 @@ class CustomTrainer(Trainer):
         """
 
         self.hydra_config = hydra_config
+        self.max_seq_length = hydra_config.data_preprocessing.max_input_length
         self.segment_eval_sentences = segment_eval_sentences
 
         self.experiment_group = hydra_config.experiment.group
@@ -127,6 +130,83 @@ class CustomTrainer(Trainer):
             self.args.output_dir, f"hydra_config_{time.time()}.yaml"
         )
         OmegaConf.save(self.hydra_config, config_output_path)
+
+    def get_train_dataloader(self) -> DataLoader:
+        """
+        Overriden to use our custom batch sampler.
+        """
+        if self.train_dataset is None:
+            raise ValueError("Trainer: training requires a train_dataset.")
+
+        train_dataset = self.train_dataset
+        data_collator = self.data_collator
+        if is_datasets_available() and isinstance(train_dataset, Dataset):
+            train_dataset = self._remove_unused_columns(train_dataset, description="training")
+        else:
+            data_collator = self._get_collator_with_removed_columns(data_collator, description="training")
+
+        train_sampler = self._get_train_sampler()
+
+        batch_sampler = CustomBatchSampler(train_sampler, batch_size=self._train_batch_size, drop_last=self.args.dataloader_drop_last, max_seq_length=self.max_seq_length)
+
+        return DataLoader(
+            train_dataset,
+            batch_sampler=batch_sampler,
+            collate_fn=data_collator,
+            num_workers=self.args.dataloader_num_workers,
+            pin_memory=self.args.dataloader_pin_memory,
+            worker_init_fn=seed_worker,
+        )
+    
+    def get_eval_dataloader(self, eval_dataset: Optional[Dataset] = None) -> DataLoader:
+        """
+        Overriden to use our custom batch sampler.
+        """
+        if eval_dataset is None and self.eval_dataset is None:
+            raise ValueError("Trainer: evaluation requires an eval_dataset.")
+        eval_dataset = eval_dataset if eval_dataset is not None else self.eval_dataset
+        data_collator = self.data_collator
+
+        if is_datasets_available() and isinstance(eval_dataset, Dataset):
+            eval_dataset = self._remove_unused_columns(eval_dataset, description="evaluation")
+        else:
+            data_collator = self._get_collator_with_removed_columns(data_collator, description="evaluation")
+
+        eval_sampler = self._get_eval_sampler(eval_dataset)
+
+        batch_sampler = CustomBatchSampler(eval_sampler, batch_size=self.args.eval_batch_size, drop_last=self.args.dataloader_drop_last, max_seq_length=self.max_seq_length)
+
+        return DataLoader(
+            eval_dataset,
+            batch_sampler=batch_sampler,
+            collate_fn=data_collator,
+            num_workers=self.args.dataloader_num_workers,
+            pin_memory=self.args.dataloader_pin_memory,
+        )
+    
+    def get_test_dataloader(self, test_dataset: Dataset) -> DataLoader:
+        """
+        Overriden to use our custom batch sampler.
+        """
+        data_collator = self.data_collator
+
+        if is_datasets_available() and isinstance(test_dataset, Dataset):
+            test_dataset = self._remove_unused_columns(test_dataset, description="test")
+        else:
+            data_collator = self._get_collator_with_removed_columns(data_collator, description="test")
+
+        test_sampler = self._get_eval_sampler(test_dataset)
+
+        batch_sampler = CustomBatchSampler(test_sampler, batch_size=self.args.eval_batch_size, drop_last=self.args.dataloader_drop_last, max_seq_length=self.max_seq_length)
+
+        # We use the same batch_size as for eval.
+        return DataLoader(
+            test_dataset,
+            batch_sampler=batch_sampler,
+            collate_fn=data_collator,
+            num_workers=self.args.dataloader_num_workers,
+            pin_memory=self.args.dataloader_pin_memory,
+        )
 
     # Override evaluate to do word segmentation
     def evaluate(
