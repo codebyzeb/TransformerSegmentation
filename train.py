@@ -92,12 +92,6 @@ def main(cfg: TransformerSegmentationConfig):
             cfg, resolve=True, throw_on_missing=True
         )
 
-    # Set up training arguments
-    # TODO: If we are using wandb sweeps, note that we will need to think about how we store/
-    # initialize the name of the current experiment so that it doesn't interfere with the name
-    # of other experiments, and also so that we can store checkpoints of that run on HF hub;
-    # alternatively maybe we use ray tune which is natively supported by Trainer
-
     training_args = TrainingArguments(
         output_dir=f"checkpoints/{cfg.experiment.group}/{cfg.experiment.name}",
         overwrite_output_dir=False,
@@ -110,7 +104,7 @@ def main(cfg: TransformerSegmentationConfig):
         max_steps=cfg.trainer.max_training_steps,
         warmup_steps=cfg.trainer.num_warmup_steps,
         seed=cfg.experiment.seed,
-        eval_steps=cfg.trainer.max_training_steps // 10,  # evaluate every 10% of training
+        eval_steps=cfg.trainer.max_training_steps // 100,  # evaluate every 1% of training
         save_steps=cfg.trainer.max_training_steps
         // 10,  # checkpoint every 10% of training
         logging_steps=cfg.trainer.max_training_steps

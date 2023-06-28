@@ -5,7 +5,7 @@ defaults:
 
 dataset: 
   name: 'transformersegmentation/CHILDES'
-  subconfig: 'english'
+  subconfig: 'English'
 
 experiment: 
   seed: 42 

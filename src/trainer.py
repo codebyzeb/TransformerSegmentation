@@ -17,7 +17,12 @@ from transformers.trainer_utils import HubStrategy, speed_metrics
 from transformers.utils import get_full_repo_name
 
 from .config import TransformerSegmentationConfig
-from .segmentation.segment import Segmenter
+from .segmentation.segment import GPT2FeaturesSegmenter, GPT2Segmenter
+
+SEGMENTER_MAP = {
+    "GPT2LMHeadModel": GPT2Segmenter,
+    "GPT2FeatureModel": GPT2FeaturesSegmenter,
+}
 
 logger = logging.getLogger(__name__)
 
@@ -171,20 +176,19 @@ class CustomTrainer(Trainer):
             metric_key_prefix=metric_key_prefix,
         )
 
-        # Evaluate word segmentation on last 3000 sentences of eval dataset
+        # Evaluate word segmentation on the segmentation evaluation sentences
         if self.segment_eval_sentences:
-            segmenter = Segmenter(
-                self.model, self.tokenizer, self.segment_eval_sentences
-            )
-            seg_metrics = segmenter.evaluate_spike_segmentation(
-                "Entropy"
-            )  # Prepend 'seg' to each key
-            seg_metrics = {
-                f"eval_seg_entropy_{k}": v
-                for k, v in seg_metrics.items()
-                if "fscore" in k
-            }
-            output.metrics.update(seg_metrics)
+            model_class = self.model.__class__.__name__
+            if model_class in SEGMENTER_MAP:
+                segmenter = SEGMENTER_MAP[model_class](
+                    self.model, self.tokenizer, self.segment_eval_sentences
+                )
+                for measure in segmenter.measures:
+                    seg_metrics = segmenter.evaluate_spike_segmentation(measure)
+                    output.metrics[f'eval_seg_{measure}_type_fscore'] = seg_metrics['type_fscore']
+                    output.metrics[f'eval_seg_{measure}_boundary_fscore'] = seg_metrics['boundary_noedge_fscore']
+            else:
+                logging.warning(f'No segmenter available for model class {model_class}, skipping segmentation evaluation')
 
         total_batch_size = self.args.eval_batch_size * self.args.world_size
         if f"{metric_key_prefix}_jit_compilation_time" in output.metrics:

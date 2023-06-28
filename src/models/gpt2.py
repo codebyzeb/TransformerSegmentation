@@ -1,7 +1,8 @@
+import math
 from typing import Optional, Tuple, Union
 import torch
 import torch.nn.functional as F
-from torch.nn import CrossEntropyLoss, Linear, LayerNorm, MSELoss
+from torch.nn import CrossEntropyLoss, Linear, LayerNorm, MSELoss, ModuleList
 from transformers.modeling_outputs import TokenClassifierOutput
 from torch.nn.parameter import Parameter
 
@@ -141,7 +142,9 @@ class GPT2FeatureModel(GPT2PreTrainedModel):
         super().__init__(config)
 
         self.feature_matrix = torch.tensor([feature_map[i] for i in feature_map.keys()], dtype=torch.float32)
+        self.vocab_size = self.feature_matrix.shape[0]
         self.feature_size = self.feature_matrix.shape[1]
+        self.return_token_logits = False
 
         # Embedding layer - map from feature vector to embedding
         self.custom_embedding = CustomLinear(self.feature_size, config.n_embd)
@@ -150,24 +153,18 @@ class GPT2FeatureModel(GPT2PreTrainedModel):
         # Transformer unchanged
         self.transformer = GPT2Model(config)
 
-        # Instead of mapping to vocab, we map to feature vector
-        self.lm_head = Linear(config.n_embd, self.feature_size, bias=True)
+        # Instead of mapping to vocab, we have a prediction head for each feature
+        self.lm_heads = ModuleList([Linear(config.n_embd, 3, bias=True) for _ in range(self.feature_size)])
 
         self.model_parallel = False
         self.device_map = None
         self.post_init()
-    
-    def get_input_embeddings(self):
-        return self.custom_embedding
-    
-    def set_input_embeddings(self, new_embeddings):
-        self.custom_embedding = new_embeddings
 
-    def get_output_embeddings(self):
-        return self.lm_head
+    # def get_output_embeddings(self):
+    #     return self.lm_head
 
-    def set_output_embeddings(self, new_embeddings):
-        self.lm_head = new_embeddings
+    # def set_output_embeddings(self, new_embeddings):
+    #     self.lm_head = new_embeddings
 
     def prepare_inputs_for_generation(self, input_ids, past_key_values=None, inputs_embeds=None, **kwargs):
         token_type_ids = kwargs.get("token_type_ids", None)
@@ -231,7 +228,7 @@ class GPT2FeatureModel(GPT2PreTrainedModel):
         """
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
-        # Instead of passing input_ids to transformer, we map to feature vector
+        # ADDED BEHAVIOUR - Instead of passing input_ids to transformer, we map to feature vector
         if inputs_embeds is None and input_ids is not None:
             inputs_embeds = F.embedding(input_ids, self.feature_matrix)
             # If less than 2 dimensions, unsqueeze
@@ -261,28 +258,45 @@ class GPT2FeatureModel(GPT2PreTrainedModel):
         # Set device for model parallelism
         if self.model_parallel:
             torch.cuda.set_device(self.transformer.first_device)
-            hidden_states = hidden_states.to(self.lm_head.weight.device)
+            hidden_states = hidden_states.to(self.lm_heads[0].weight.device)
 
-        lm_logits = self.lm_head(hidden_states)
+        # ADDED BEHAVIOUR - multiple lm head predict features, instead a single lm head to predict a token
+        feature_logits = [lm_head(hidden_states) for lm_head in self.lm_heads]
 
         loss = None
         if labels is not None:
-            # Shift so that tokens < n predict n
-            shift_logits = lm_logits[..., :-1, :].contiguous()
-            label_vecs = F.embedding(labels, self.feature_matrix)
-            shift_labels = label_vecs[..., 1:, :].contiguous()
+            loss = 0
+            label_vectors = F.embedding(labels, self.feature_matrix)
+            for i, logits in enumerate(feature_logits):
+                # Shift so that tokens < n predict n
+                shift_logits = logits[..., :-1, :].contiguous()
+                shift_labels = label_vectors[..., 1:, i].contiguous().long()
 
-            # Do regression loss
-            loss_fct = MSELoss()
-            loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1, shift_labels.size(-1)))
+                # Flatten the tokens
+                loss_fct = CrossEntropyLoss()
+                loss += loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1)) / self.feature_size
+
+        # Generate a tensor for token ids that has the same shape as logits
+        if self.return_token_logits:
+            shape = list(feature_logits[0].shape)
+            shape[-1] = self.vocab_size
+            log_probs = torch.zeros(shape, device=feature_logits[0].device)
+            feature_matrix_long = self.feature_matrix.long()
+            for feature in range(self.feature_size):
+                feature_probs = F.log_softmax(feature_logits[feature], dim=-1)
+                log_probs += feature_probs[:, :, feature_matrix_long[:, feature]]
+            log_probs += math.log(1 / self.feature_size)
+            logits = log_probs - torch.log(1 - torch.exp(log_probs)) # Convert back to logits
+        else:
+            logits = torch.stack(feature_logits, dim=1)
 
         if not return_dict:
-            output = (lm_logits,) + transformer_outputs[1:]
+            output = (logits,) + transformer_outputs[1:]
             return ((loss,) + output) if loss is not None else output
 
         return CausalLMOutputWithCrossAttentions(
             loss=loss,
-            logits=lm_logits,
+            logits=logits,
             past_key_values=transformer_outputs.past_key_values,
             hidden_states=transformer_outputs.hidden_states,
             attentions=transformer_outputs.attentions,
