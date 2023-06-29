@@ -64,7 +64,7 @@ class DataPreprocessor(object):
         self.word_boundary_token = tokenizer.convert_tokens_to_ids("WORD_BOUNDARY")
 
     def __call__(self, examples):
-        if self.join_utts:
+        if self.join_utts == 'static':
             joined = " ".join([utt for utt in examples["text"]])
             joined = self.tokenizer(joined, truncation=False, padding=False)
             input_ids = joined["input_ids"]
@@ -88,6 +88,10 @@ class DataPreprocessor(object):
                 batch["attention_mask"].append(attention_mask[i : i + self.max_input_length])
                 batch["word_starts"].append(word_starts[i : i + self.max_input_length])
             return batch
+        
+        # If join_utts is None, we add a utterance boundary token to the start of each utterance
+        elif self.join_utts is None:
+            examples["text"] = [("\n " + examples["text"][i]) for i in range(len(examples["text"]))]
 
         tokenized = self.tokenizer(
             examples["text"],

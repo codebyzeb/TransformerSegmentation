@@ -12,7 +12,7 @@ from typing import List, Optional
 
 from huggingface_hub import Repository, create_repo
 from omegaconf import OmegaConf
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, BatchSampler
 from transformers.trainer import Trainer
 from transformers.trainer_utils import HubStrategy, speed_metrics, seed_worker
 from transformers.utils import get_full_repo_name, is_datasets_available
@@ -147,7 +147,10 @@ class CustomTrainer(Trainer):
 
         train_sampler = self._get_train_sampler()
 
-        batch_sampler = CustomBatchSampler(train_sampler, batch_size=self._train_batch_size, drop_last=self.args.dataloader_drop_last, max_seq_length=self.max_seq_length)
+        if self.hydra_config.data_preprocessing.join_utts == 'dynamic':
+            batch_sampler = CustomBatchSampler(train_sampler, batch_size=self._train_batch_size, drop_last=self.args.dataloader_drop_last, max_seq_length=self.max_seq_length)
+        else:
+            batch_sampler = BatchSampler(train_sampler, batch_size=self._train_batch_size, drop_last=self.args.dataloader_drop_last)
 
         return DataLoader(
             train_dataset,
@@ -174,7 +177,10 @@ class CustomTrainer(Trainer):
 
         eval_sampler = self._get_eval_sampler(eval_dataset)
 
-        batch_sampler = CustomBatchSampler(eval_sampler, batch_size=self.args.eval_batch_size, drop_last=self.args.dataloader_drop_last, max_seq_length=self.max_seq_length)
+        if self.hydra_config.data_preprocessing.join_utts == 'dynamic':
+            batch_sampler = CustomBatchSampler(eval_sampler, batch_size=self.args.eval_batch_size, drop_last=self.args.dataloader_drop_last, max_seq_length=self.max_seq_length)
+        else:
+            batch_sampler = BatchSampler(eval_sampler, batch_size=self.args.eval_batch_size, drop_last=self.args.dataloader_drop_last)
 
         return DataLoader(
             eval_dataset,
@@ -196,8 +202,11 @@ class CustomTrainer(Trainer):
             data_collator = self._get_collator_with_removed_columns(data_collator, description="test")
 
         test_sampler = self._get_eval_sampler(test_dataset)
-
-        batch_sampler = CustomBatchSampler(test_sampler, batch_size=self.args.eval_batch_size, drop_last=self.args.dataloader_drop_last, max_seq_length=self.max_seq_length)
+        
+        if self.hydra_config.data_preprocessing.join_utts == 'dynamic':
+            batch_sampler = CustomBatchSampler(test_sampler, batch_size=self.args.eval_batch_size, drop_last=self.args.dataloader_drop_last, max_seq_length=self.max_seq_length)
+        else:
+            batch_sampler = BatchSampler(test_sampler, batch_size=self.args.eval_batch_size, drop_last=self.args.dataloader_drop_last)
 
         # We use the same batch_size as for eval.
         return DataLoader(
