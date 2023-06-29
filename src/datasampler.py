@@ -56,3 +56,10 @@ class CustomBatchSampler(BatchSampler):
                     batch = [idx]
             if idx_in_batch > 0:
                 yield batch[:idx_in_batch]
+
+    def __len__(self):
+        total_length = sum([len(self.sampler.data_source[idx]["input_ids"]) for idx in self.sampler])
+        if self.drop_last:
+            return total_length // self.total_batch_size
+        else:
+            return (total_length + self.total_batch_size - 1) // self.total_batch_size
