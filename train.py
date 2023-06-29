@@ -11,7 +11,8 @@ import hydra
 from datasets import load_dataset
 from hydra.core.config_store import ConfigStore
 from omegaconf import OmegaConf
-from transformers import TrainingArguments
+from transformers.trainer import TrainingArguments
+from transformers.data import DataCollatorForLanguageModeling
 
 # wandb for logging metrics
 import wandb
@@ -44,6 +45,8 @@ def main(cfg: TransformerSegmentationConfig):
     missing_keys: set[str] = OmegaConf.missing_keys(cfg)
     if missing_keys:
         raise RuntimeError(f"Missing keys in config: \n {missing_keys}")
+    if cfg.data_preprocessing.join_utts not in ["dynamic", "static", None]:
+        raise RuntimeError(f"Invalid value for join_utts: {cfg.data_preprocessing.join_utts}. Must be one of 'dynamic', 'static', or None.")
 
     logger.info(f"Config: {OmegaConf.to_yaml(cfg)}")
 
@@ -87,9 +90,6 @@ def main(cfg: TransformerSegmentationConfig):
         remove_columns=["text"],
     )
 
-    # Remove all items that are shorter than the minimum length
-    processed_dataset = processed_dataset.filter(lambda x: len(x["input_ids"]) <= cfg.data_preprocessing.max_input_length)
-
     train_dataset = processed_dataset["train"]
     eval_dataset = processed_dataset["validation"]
     if cfg.experiment.dry_run:
@@ -97,7 +97,10 @@ def main(cfg: TransformerSegmentationConfig):
         train_dataset = train_dataset.select(range(0, train_dataset.num_rows, DRY_RUN_SUBSAMPLE_FACTOR))
 
     # Set up custom data collator which joins examples to fill the context size
-    data_collator = CustomDataCollatorForLanguageModeling(tokenizer, max_seq_length=cfg.data_preprocessing.max_input_length, mlm=False)
+    if cfg.data_preprocessing.join_utts == 'dynamic':
+        data_collator = CustomDataCollatorForLanguageModeling(tokenizer, max_seq_length=cfg.data_preprocessing.max_input_length, mlm=False)
+    else:
+        data_collator = DataCollatorForLanguageModeling(tokenizer, mlm=False)
 
     # Setting up wandb
     if cfg.experiment.offline_run:

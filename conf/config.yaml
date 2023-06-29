@@ -12,7 +12,7 @@ experiment:
 
 data_preprocessing:
   max_input_length: 64
-  join_utts: True
+  #join_utts: None
 
 tokenizer:
   name: 'transformersegmentation/CHILDES-Tokenizer' 

@@ -49,7 +49,7 @@ class TokenizerParams:
 class DataPreprocessingParams:
     # params for preprocessing the dataset (i.e. tokenization)
     max_input_length: int
-    join_utts: bool
+    join_utts: Optional[str] = None
 
 
 @dataclass
