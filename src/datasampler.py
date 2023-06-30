@@ -6,6 +6,7 @@ from typing import Callable, Iterator, Sequence, Union
 # typing imports
 from torch.utils.data import BatchSampler
 
+
 class CustomBatchSampler(BatchSampler):
     """
     Custom batch sampler that ensures we get enough data to fill a batch once the collator has joined utterances together to sequence of length max_seq_length.
@@ -22,6 +23,9 @@ class CustomBatchSampler(BatchSampler):
         super().__init__(sampler, batch_size, drop_last)
         self.max_seq_len = max_seq_length
         self.total_batch_size = batch_size * max_seq_length
+        # Compute lengths once and store them
+        self.lengths = {idx: len(self.sampler.data_source[idx]["input_ids"]) for idx in self.sampler}
+        self.total_length = sum(self.lengths.values())
 
     def __iter__(self):
         if self.drop_last:
@@ -33,7 +37,7 @@ class CustomBatchSampler(BatchSampler):
                     while total_len < self.total_batch_size:
                         idx = next(sampler_iter)
                         batch.append(idx)
-                        length = len(self.sampler.data_source[idx]["input_ids"])
+                        length = self.lengths[idx]
                         total_len += length
                     yield batch[:-1]
                     batch = [idx]
@@ -46,7 +50,7 @@ class CustomBatchSampler(BatchSampler):
             total_len = 0
             for idx in self.sampler:
                 batch.append(idx)
-                length = len(self.sampler.data_source[idx]["input_ids"])
+                length = self.lengths[idx]
                 total_len += length
                 idx_in_batch += 1
                 if total_len >= self.total_batch_size:
@@ -58,8 +62,7 @@ class CustomBatchSampler(BatchSampler):
                 yield batch[:idx_in_batch]
 
     def __len__(self):
-        total_length = sum([len(self.sampler.data_source[idx]["input_ids"]) for idx in self.sampler])
         if self.drop_last:
-            return total_length // self.total_batch_size
+            return self.total_length // self.total_batch_size
         else:
-            return (total_length + self.total_batch_size - 1) // self.total_batch_size
+            return (self.total_length + self.total_batch_size - 1) // self.total_batch_size
