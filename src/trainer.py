@@ -5,6 +5,7 @@ import math
 import os
 import shutil
 import time
+import torch
 from pathlib import Path
 
 # typing imports
@@ -16,6 +17,7 @@ from torch.utils.data import DataLoader, Dataset, BatchSampler
 from transformers.trainer import Trainer
 from transformers.trainer_utils import HubStrategy, speed_metrics, seed_worker
 from transformers.utils import get_full_repo_name, is_datasets_available
+from tqdm.auto import tqdm
 
 from .config import TransformerSegmentationConfig
 from .segmentation.segment import GPT2FeaturesSegmenter, GPT2Segmenter
@@ -53,6 +55,8 @@ class CustomTrainer(Trainer):
 
         self.experiment_group = hydra_config.experiment.group
         self.experiment_name = hydra_config.experiment.name
+
+        self.stride_evaluation = None
 
         super().__init__(**kwargs)
 
@@ -264,6 +268,80 @@ class CustomTrainer(Trainer):
             ignore_keys=ignore_keys,
             metric_key_prefix=metric_key_prefix,
         )
+
+        if self.stride_evaluation is not None:
+
+            # Create longs vector with all input ids and labels in eval_dataset
+            long_input_ids = []
+            for batch in eval_dataloader:
+                long_input_ids.extend(batch['input_ids'].flatten().tolist())
+            long_input_ids = torch.tensor(long_input_ids).to(self.args.device)
+            long_target_ids = []
+            for batch in eval_dataloader:
+                long_target_ids.extend(batch['labels'].flatten().tolist())
+            long_target_ids = torch.tensor(long_target_ids).to(self.args.device)
+            
+            max_length = self.max_seq_length
+            stride = self.stride_evaluation
+            input_id_length = len(long_input_ids)
+            logger.info('Evaluating perplexity with stride %d and max length %d' % (stride, max_length))
+
+            # Batch the input ids and labels into sequences of length max_length by shifting by stride
+            input_ids = []
+            target_ids = []
+            prev_end_loc = 0
+            batch_size = self.args.eval_batch_size
+            for begin_loc in range(0, len(long_input_ids), stride):
+                end_loc = min(begin_loc + max_length, len(long_input_ids))
+                trg_len = end_loc - prev_end_loc  # may be different from stride on last loop
+                inputs = long_input_ids[begin_loc:end_loc].to(self.args.device)
+                targets = long_target_ids[begin_loc:end_loc].to(self.args.device).clone
+                targets[:-trg_len] = -100
+                input_ids.append(inputs)
+                target_ids.append(targets)
+                prev_end_loc = end_loc
+                if end_loc == input_id_length:
+                    break
+
+            # Ensure divisible by batch_size
+            while len(input_ids) % batch_size != 0:
+                input_ids.append(torch.zeros_like(input_ids[0]))
+                # Set to -100 for targets
+                target_ids.append(torch.ones_like(target_ids[0]) * -100)
+
+            # Stack into batches of batch_size
+            input_ids = torch.stack(input_ids)
+            target_ids = torch.stack(target_ids)
+            input_ids = input_ids.view(-1, batch_size, max_length)
+            target_ids = target_ids.view(-1, batch_size, max_length)
+            seq_len = input_ids.size(0)
+
+            nlls = []
+            for i in tqdm(range(seq_len)):
+                with torch.no_grad():
+                    outputs = self.model(input_ids[i], labels=target_ids[i])
+                    # loss is calculated using CrossEntropyLoss which averages over valid labels
+                    # N.B. the model only calculates loss over trg_len - 1 labels, because it internally shifts the labels
+                    # to the left by 1.
+                    neg_log_likelihood = outputs.loss
+
+                nlls.append(neg_log_likelihood)
+
+            nlls = [nll for nll in nlls if not torch.isnan(nll)]
+            ppl = torch.exp(torch.stack(nlls).mean())
+            bpc = torch.stack(nlls).mean() / math.log(2)
+            output.metrics[f"{metric_key_prefix}_stride_perplexity"] = ppl
+            output.metrics[f"{metric_key_prefix}_stride_bpc"] = bpc
+
+        # Get perplexity on evaluation set
+        eval_loss = output.metrics[f"{metric_key_prefix}_loss"]
+        perplexity = math.exp(eval_loss)
+        output.metrics[f"{metric_key_prefix}_perplexity"] = perplexity
+
+        # Get bits per character on evaluation set
+        eval_loss = output.metrics[f"{metric_key_prefix}_loss"]
+        bits_per_character = eval_loss / math.log(2)
+        output.metrics[f"{metric_key_prefix}_bpc"] = bits_per_character
 
         # Evaluate word segmentation on the segmentation evaluation sentences
         if self.segment_eval_sentences:

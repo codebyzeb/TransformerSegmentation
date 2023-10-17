@@ -95,6 +95,7 @@ def main(cfg: TransformerSegmentationConfig):
     if cfg.experiment.dry_run:
         logger.info(f"Running in dry run mode -- subsampling dataset by {DRY_RUN_SUBSAMPLE_FACTOR}x")
         train_dataset = train_dataset.select(range(0, train_dataset.num_rows, DRY_RUN_SUBSAMPLE_FACTOR))
+        eval_dataset = eval_dataset.select(range(0, eval_dataset.num_rows, DRY_RUN_SUBSAMPLE_FACTOR))
 
     # Set up custom data collator which joins examples to fill the context size
     if cfg.data_preprocessing.join_utts == 'dynamic':
@@ -166,6 +167,10 @@ def main(cfg: TransformerSegmentationConfig):
 
     # Train model
     trainer.train(resume_from_checkpoint=cfg.experiment.resume_checkpoint_path)
+
+    # Evaluate best model
+    trainer.stride_evaluation = 16
+    trainer.evaluate(metric_key_prefix="eval_best")
 
 
 if __name__ == "__main__":
