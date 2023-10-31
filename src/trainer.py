@@ -76,9 +76,7 @@ class CustomTrainer(Trainer):
         else:
             repo_name = self.args.hub_model_id
         if "/" not in repo_name:
-            repo_name = get_full_repo_name(
-                repo_name, token=self.args.hub_token
-            )
+            repo_name = get_full_repo_name(repo_name, token=self.args.hub_token)
 
         # Make sure the repo exists.
         create_repo(
@@ -115,12 +113,7 @@ class CustomTrainer(Trainer):
             pass
 
         # By default, ignore the checkpoint folders
-        if (
-            not os.path.exists(
-                os.path.join(self.args.output_dir, ".gitignore")
-            )
-            and self.args.hub_strategy != HubStrategy.ALL_CHECKPOINTS
-        ):
+        if not os.path.exists(os.path.join(self.args.output_dir, ".gitignore")) and self.args.hub_strategy != HubStrategy.ALL_CHECKPOINTS:
             with open(
                 os.path.join(self.args.output_dir, ".gitignore"),
                 "w",
@@ -130,9 +123,7 @@ class CustomTrainer(Trainer):
 
         self.push_in_progress = None
 
-        config_output_path = os.path.join(
-            self.args.output_dir, f"hydra_config_{time.time()}.yaml"
-        )
+        config_output_path = os.path.join(self.args.output_dir, f"hydra_config_{time.time()}.yaml")
         OmegaConf.save(self.hydra_config, config_output_path)
 
     def get_train_dataloader(self) -> DataLoader:
@@ -151,8 +142,13 @@ class CustomTrainer(Trainer):
 
         train_sampler = self._get_train_sampler()
 
-        if self.hydra_config.data_preprocessing.join_utts == 'dynamic':
-            batch_sampler = CustomBatchSampler(train_sampler, batch_size=self._train_batch_size, drop_last=self.args.dataloader_drop_last, max_seq_length=self.max_seq_length)
+        if self.hydra_config.data_preprocessing.join_utts == "dynamic":
+            batch_sampler = CustomBatchSampler(
+                train_sampler,
+                batch_size=self._train_batch_size,
+                drop_last=self.args.dataloader_drop_last,
+                max_seq_length=self.max_seq_length,
+            )
         else:
             batch_sampler = BatchSampler(train_sampler, batch_size=self._train_batch_size, drop_last=self.args.dataloader_drop_last)
 
@@ -164,7 +160,7 @@ class CustomTrainer(Trainer):
             pin_memory=self.args.dataloader_pin_memory,
             worker_init_fn=seed_worker,
         )
-    
+
     def get_eval_dataloader(self, eval_dataset: Optional[Dataset] = None) -> DataLoader:
         """
         Overriden to use our custom batch sampler.
@@ -181,8 +177,13 @@ class CustomTrainer(Trainer):
 
         eval_sampler = self._get_eval_sampler(eval_dataset)
 
-        if self.hydra_config.data_preprocessing.join_utts == 'dynamic':
-            batch_sampler = CustomBatchSampler(eval_sampler, batch_size=self.args.eval_batch_size, drop_last=self.args.dataloader_drop_last, max_seq_length=self.max_seq_length)
+        if self.hydra_config.data_preprocessing.join_utts == "dynamic":
+            batch_sampler = CustomBatchSampler(
+                eval_sampler,
+                batch_size=self.args.eval_batch_size,
+                drop_last=self.args.dataloader_drop_last,
+                max_seq_length=self.max_seq_length,
+            )
         else:
             batch_sampler = BatchSampler(eval_sampler, batch_size=self.args.eval_batch_size, drop_last=self.args.dataloader_drop_last)
 
@@ -193,7 +194,7 @@ class CustomTrainer(Trainer):
             num_workers=self.args.dataloader_num_workers,
             pin_memory=self.args.dataloader_pin_memory,
         )
-    
+
     def get_test_dataloader(self, test_dataset: Dataset) -> DataLoader:
         """
         Overriden to use our custom batch sampler.
@@ -206,9 +207,14 @@ class CustomTrainer(Trainer):
             data_collator = self._get_collator_with_removed_columns(data_collator, description="test")
 
         test_sampler = self._get_eval_sampler(test_dataset)
-        
-        if self.hydra_config.data_preprocessing.join_utts == 'dynamic':
-            batch_sampler = CustomBatchSampler(test_sampler, batch_size=self.args.eval_batch_size, drop_last=self.args.dataloader_drop_last, max_seq_length=self.max_seq_length)
+
+        if self.hydra_config.data_preprocessing.join_utts == "dynamic":
+            batch_sampler = CustomBatchSampler(
+                test_sampler,
+                batch_size=self.args.eval_batch_size,
+                drop_last=self.args.dataloader_drop_last,
+                max_seq_length=self.max_seq_length,
+            )
         else:
             batch_sampler = BatchSampler(test_sampler, batch_size=self.args.eval_batch_size, drop_last=self.args.dataloader_drop_last)
 
@@ -254,37 +260,30 @@ class CustomTrainer(Trainer):
         eval_dataloader = self.get_eval_dataloader(eval_dataset)
         start_time = time.time()
 
-        eval_loop = (
-            self.prediction_loop
-            if self.args.use_legacy_prediction_loop
-            else self.evaluation_loop
-        )
+        eval_loop = self.prediction_loop if self.args.use_legacy_prediction_loop else self.evaluation_loop
         output = eval_loop(
             eval_dataloader,
             description="Evaluation",
-            prediction_loss_only=True
-            if self.compute_metrics is None
-            else None,
+            prediction_loss_only=True if self.compute_metrics is None else None,
             ignore_keys=ignore_keys,
             metric_key_prefix=metric_key_prefix,
         )
 
         if self.stride_evaluation is not None:
-
             # Create longs vector with all input ids and labels in eval_dataset
             long_input_ids = []
             for batch in eval_dataloader:
-                long_input_ids.extend(batch['input_ids'].flatten().tolist())
+                long_input_ids.extend(batch["input_ids"].flatten().tolist())
             long_input_ids = torch.tensor(long_input_ids).to(self.args.device)
             long_target_ids = []
             for batch in eval_dataloader:
-                long_target_ids.extend(batch['labels'].flatten().tolist())
+                long_target_ids.extend(batch["labels"].flatten().tolist())
             long_target_ids = torch.tensor(long_target_ids).to(self.args.device)
-            
+
             max_length = self.max_seq_length
             stride = self.stride_evaluation
             input_id_length = len(long_input_ids)
-            logger.info('Evaluating perplexity with stride %d and max length %d' % (stride, max_length))
+            logger.info("Evaluating perplexity with stride %d and max length %d" % (stride, max_length))
 
             # Batch the input ids and labels into sequences of length max_length by shifting by stride
             input_ids = []
@@ -295,7 +294,7 @@ class CustomTrainer(Trainer):
                 end_loc = min(begin_loc + max_length, len(long_input_ids))
                 trg_len = end_loc - prev_end_loc  # may be different from stride on last loop
                 inputs = long_input_ids[begin_loc:end_loc].to(self.args.device)
-                targets = long_target_ids[begin_loc:end_loc].to(self.args.device).clone
+                targets = long_target_ids[begin_loc:end_loc].to(self.args.device).clone()
                 targets[:-trg_len] = -100
                 input_ids.append(inputs)
                 target_ids.append(targets)
@@ -338,7 +337,7 @@ class CustomTrainer(Trainer):
         perplexity = math.exp(eval_loss)
         output.metrics[f"{metric_key_prefix}_perplexity"] = perplexity
 
-        # Get bits per character on evaluation set
+        # Get bits per character on evaluation set
         eval_loss = output.metrics[f"{metric_key_prefix}_loss"]
         bits_per_character = eval_loss / math.log(2)
         output.metrics[f"{metric_key_prefix}_bpc"] = bits_per_character
@@ -347,21 +346,17 @@ class CustomTrainer(Trainer):
         if self.segment_eval_sentences:
             model_class = self.model.__class__.__name__
             if model_class in SEGMENTER_MAP:
-                segmenter = SEGMENTER_MAP[model_class](
-                    self.model, self.tokenizer, self.segment_eval_sentences
-                )
+                segmenter = SEGMENTER_MAP[model_class](self.model, self.tokenizer, self.segment_eval_sentences)
                 for measure in segmenter.measures:
                     seg_metrics = segmenter.evaluate_spike_segmentation(measure)
-                    output.metrics[f'eval_seg_{measure}_type_fscore'] = seg_metrics['type_fscore']
-                    output.metrics[f'eval_seg_{measure}_boundary_fscore'] = seg_metrics['boundary_noedge_fscore']
+                    output.metrics[f"eval_seg_{measure}_type_fscore"] = seg_metrics["type_fscore"]
+                    output.metrics[f"eval_seg_{measure}_boundary_fscore"] = seg_metrics["boundary_noedge_fscore"]
             else:
-                logging.warning(f'No segmenter available for model class {model_class}, skipping segmentation evaluation')
+                logging.warning(f"No segmenter available for model class {model_class}, skipping segmentation evaluation")
 
         total_batch_size = self.args.eval_batch_size * self.args.world_size
         if f"{metric_key_prefix}_jit_compilation_time" in output.metrics:
-            start_time += output.metrics[
-                f"{metric_key_prefix}_jit_compilation_time"
-            ]
+            start_time += output.metrics[f"{metric_key_prefix}_jit_compilation_time"]
         output.metrics.update(
             speed_metrics(
                 metric_key_prefix,
