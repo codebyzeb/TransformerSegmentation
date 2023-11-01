@@ -18,7 +18,7 @@ tokenizer:
   name: 'transformersegmentation/CHILDES-Tokenizer' 
 
 trainer: 
-  batch_size: 128 # across 8 GPUs gives an effective batch size of 1024
+  batch_size: 32 # across 8 GPUs gives an effective batch size of 1024
   lr: 1e-3 # 1e-4 is used in fairseq; 1e-3 is default in huggingface
   num_warmup_steps: 30_000
   max_training_steps: 100_000

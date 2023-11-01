@@ -349,8 +349,8 @@ class CustomTrainer(Trainer):
                 segmenter = SEGMENTER_MAP[model_class](self.model, self.tokenizer, self.segment_eval_sentences)
                 for measure in segmenter.measures:
                     seg_metrics = segmenter.evaluate_spike_segmentation(measure)
-                    output.metrics[f"eval_seg_{measure}_type_fscore"] = seg_metrics["type_fscore"]
-                    output.metrics[f"eval_seg_{measure}_boundary_fscore"] = seg_metrics["boundary_noedge_fscore"]
+                    output.metrics[f'{metric_key_prefix}_seg_{measure}_type_fscore'] = seg_metrics['type_fscore']
+                    output.metrics[f'{metric_key_prefix}_seg_{measure}_boundary_fscore'] = seg_metrics['boundary_noedge_fscore']
             else:
                 logging.warning(f"No segmenter available for model class {model_class}, skipping segmentation evaluation")
 
