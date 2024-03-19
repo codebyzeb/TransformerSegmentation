@@ -323,7 +323,7 @@ class GPT2FeatureModel(GPT2PreTrainedModel):
         loss = None
         if labels is not None:
             # Get label vectors as indices rather than one-hot vectors
-            label_vectors = self.feature_map.as_indices(labels)
+            label_vectors = self.feature_map.as_indices(labels.clone()) # Need to clone to avoid in-place modification
             # Shift so that tokens < n predict n
             shift_logits = lm_logits[..., :-1, :, :].contiguous()
             shift_labels = label_vectors[..., 1:, :].contiguous().long()
