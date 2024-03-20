@@ -42,6 +42,11 @@ def main(cfg: TransformerSegmentationConfig):
         "HF_READ_TOKEN" in os.environ and "HF_WRITE_TOKEN" in os.environ
     ), "HF_READ_TOKEN and HF_WRITE_TOKEN need to be set as environment variables"
 
+    if 'name' not in cfg.experiment.__dict__:
+        # Set to dataset subconfig with random 5 digit number
+        cfg.experiment.name = f"{cfg.dataset.subconfig}-{str(torch.randint(10000, (1,)).item()).zfill(5)}"
+        logger.warning(f"experiment.name not set, using {cfg.experiment.name}")
+
     missing_keys: set[str] = OmegaConf.missing_keys(cfg)
     if missing_keys:
         raise RuntimeError(f"Missing keys in config: \n {missing_keys}")
