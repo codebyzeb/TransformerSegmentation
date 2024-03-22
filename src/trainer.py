@@ -5,23 +5,23 @@ import math
 import os
 import shutil
 import time
-import torch
 from pathlib import Path
 
 # typing imports
 from typing import List, Optional
 
+import torch
 from huggingface_hub import Repository, create_repo
 from omegaconf import OmegaConf
-from torch.utils.data import DataLoader, Dataset, BatchSampler
-from transformers.trainer import Trainer
-from transformers.trainer_utils import HubStrategy, speed_metrics, seed_worker
-from transformers.utils import get_full_repo_name, is_datasets_available
+from torch.utils.data import BatchSampler, DataLoader, Dataset
 from tqdm.auto import tqdm
+from transformers.trainer import Trainer
+from transformers.trainer_utils import HubStrategy, seed_worker, speed_metrics
+from transformers.utils import get_full_repo_name, is_datasets_available
 
 from .config import TransformerSegmentationConfig
-from .segmentation.segment import GPT2FeaturesSegmenter, GPT2Segmenter
 from .datasampler import CustomBatchSampler
+from .segmentation.segment import GPT2FeaturesSegmenter, GPT2Segmenter
 
 SEGMENTER_MAP = {
     "GPT2LMHeadModel": GPT2Segmenter,
@@ -300,6 +300,11 @@ class CustomTrainer(Trainer):
                 target_ids.append(targets)
                 prev_end_loc = end_loc
                 if end_loc == input_id_length:
+                    # Ensure final set of input_ids is the same length as the rest
+                    input_ids[-1] = torch.cat((input_ids[-1], torch.zeros(stride - trg_len, dtype=torch.long, device=self.args.device)))
+                    target_ids[-1] = torch.cat(
+                        (target_ids[-1], torch.ones(stride - trg_len, dtype=torch.long, device=self.args.device) * -100)
+                    )
                     break
 
             # Ensure divisible by batch_size
@@ -349,8 +354,8 @@ class CustomTrainer(Trainer):
                 segmenter = SEGMENTER_MAP[model_class](self.model, self.tokenizer, self.segment_eval_sentences)
                 for measure in segmenter.measures:
                     seg_metrics = segmenter.evaluate_spike_segmentation(measure)
-                    output.metrics[f'{metric_key_prefix}_seg_{measure}_type_fscore'] = seg_metrics['type_fscore']
-                    output.metrics[f'{metric_key_prefix}_seg_{measure}_boundary_fscore'] = seg_metrics['boundary_noedge_fscore']
+                    output.metrics[f"{metric_key_prefix}_seg_{measure}_type_fscore"] = seg_metrics["type_fscore"]
+                    output.metrics[f"{metric_key_prefix}_seg_{measure}_boundary_fscore"] = seg_metrics["boundary_noedge_fscore"]
             else:
                 logging.warning(f"No segmenter available for model class {model_class}, skipping segmentation evaluation")
 
@@ -367,3 +372,9 @@ class CustomTrainer(Trainer):
         )
 
         self.log(output.metrics)
+
+        self.control = self.callback_handler.on_evaluate(self.args, self.state, self.control, output.metrics)
+
+        self._memory_tracker.stop_and_update_metrics(output.metrics)
+
+        return output.metrics

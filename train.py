@@ -131,6 +131,16 @@ def main(cfg: TransformerSegmentationConfig):
             resume="allow",
             id=cfg.experiment.resume_run_id,
         )
+        # Report number of parameters
+        num_params = sum(p.numel() for p in model.parameters())
+        logger.info(f"Number of parameters: {num_params}")
+        wandb.config.update({"num_params": num_params})
+
+        # Report length of data
+        logger.info(f"Number of training examples: {train_dataset.num_rows}")
+        logger.info(f"Number of validation examples: {eval_dataset.num_rows}")
+        wandb.config.update({"num_train_examples": train_dataset.num_rows})
+        wandb.config.update({"num_val_examples": eval_dataset.num_rows})
 
     training_args = TrainingArguments(
         output_dir=f"checkpoints/{cfg.experiment.group}/{cfg.experiment.name}",
@@ -144,7 +154,7 @@ def main(cfg: TransformerSegmentationConfig):
         max_steps=cfg.trainer.max_training_steps,
         warmup_steps=cfg.trainer.num_warmup_steps,
         seed=cfg.experiment.seed,
-        eval_steps=cfg.trainer.max_training_steps // (2 if cfg.experiment.dry_run else 100),  # evaluate every 1% of training
+        eval_steps=cfg.trainer.max_training_steps // (2 if cfg.experiment.dry_run else 50),  # evaluate every 2% of training
         save_steps=cfg.trainer.max_training_steps // (2 if cfg.experiment.dry_run else 10),  # checkpoint every 10% of training
         logging_steps=cfg.trainer.max_training_steps // 100,  # log every 1% of training
         run_name=cfg.experiment.name,
@@ -156,6 +166,9 @@ def main(cfg: TransformerSegmentationConfig):
         hub_token=os.environ["HF_WRITE_TOKEN"] if not cfg.experiment.offline_run else None,
         remove_unused_columns=True,
         label_names=["input_ids"],
+        load_best_model_at_end=True,
+        metric_for_best_model="eval_perplexity",
+        greater_is_better=False,  # smaller perplexity is better
     )
 
     # Set up trainer
