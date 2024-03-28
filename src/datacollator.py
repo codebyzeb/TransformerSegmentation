@@ -1,5 +1,4 @@
 from transformers.data import DataCollatorForLanguageModeling
-from torch.utils.data import BatchSampler
 
 class CustomDataCollatorForLanguageModeling(DataCollatorForLanguageModeling):
     """

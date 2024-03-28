@@ -6,6 +6,7 @@ defaults:
 dataset: 
   name: 'transformersegmentation/CHILDES'
   subconfig: 'English'
+  max_age: 24
 
 experiment: 
   seed: 42 

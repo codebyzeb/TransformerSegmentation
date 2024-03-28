@@ -8,7 +8,7 @@ import torch
 import hydra
 
 # training pipeline imports
-from datasets import load_dataset
+from datasets import load_dataset, Features, Value
 from hydra.core.config_store import ConfigStore
 from omegaconf import OmegaConf
 from transformers.trainer import TrainingArguments
@@ -66,12 +66,26 @@ def main(cfg: TransformerSegmentationConfig):
         cfg.trainer.num_warmup_steps = DRY_RUN_WARMUP_STEPS
 
     # Loading dataset
+    # TODO: Custom data loading depending on if CHILDES or BR dataset
     logger.info("Loading dataset")
+    load_columns = ["phonemized_utterance", "target_child_age"]
+    features = Features({"phonemized_utterance": Value("string"), "target_child_age": Value("float")})
     dataset = load_dataset(
         cfg.dataset.name,
         cfg.dataset.subconfig,
         use_auth_token=os.environ["HF_READ_TOKEN"],
+        column_names=load_columns,
+        features=features,
     )
+
+    # Drop rows where target_child_age is none or is larger than the max_age
+    if cfg.dataset.max_age is not None:
+        dataset = dataset.filter(lambda x: x["target_child_age"] is not None and x["target_child_age"] <= cfg.dataset.max_age, num_proc=64)
+        
+    # Rename "phonemized_utterance" to "text"
+    dataset = dataset.rename_column("phonemized_utterance", "text")
+
+    logging.info(f"Dataset loaded with {len(dataset['train'])} training examples")
 
     logger.info("Loading tokenizer")
     tokenizer = load_tokenizer(cfg, dataset)
@@ -80,9 +94,10 @@ def main(cfg: TransformerSegmentationConfig):
     logger.info("Initializing model")
     model = load_model(cfg, tokenizer)
 
-    # Get a sample of the validation set for evaluation
-    num_rows = dataset["validation"].num_rows
-    segment_eval_sentences = dataset["validation"].select(range(num_rows - 3000, num_rows))["text"]
+    # Get a sample of the validation set for evaluating segmentation. We do this before preprocessing because
+    # preprocessing removes word boundaries, which we need as labels for evaluation.
+    num_rows = dataset["valid"].num_rows
+    segment_eval_sentences = dataset["valid"].select(range(0, num_rows, num_rows//3000))["text"]
 
     # Preprocess data
     logger.info("Preprocessing data")
@@ -92,11 +107,11 @@ def main(cfg: TransformerSegmentationConfig):
         data_preprocessor,
         batched=True,
         # num_proc=64,
-        remove_columns=["text"],
+        remove_columns=["text", "target_child_age"],
     )
 
     train_dataset = processed_dataset["train"]
-    eval_dataset = processed_dataset["validation"]
+    eval_dataset = processed_dataset["valid"]
     if cfg.experiment.dry_run:
         logger.info(f"Running in dry run mode -- subsampling dataset by {DRY_RUN_SUBSAMPLE_FACTOR}x")
         train_dataset = train_dataset.select(range(0, train_dataset.num_rows, DRY_RUN_SUBSAMPLE_FACTOR))

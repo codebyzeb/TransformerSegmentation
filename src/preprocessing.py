@@ -64,6 +64,10 @@ class DataPreprocessor(object):
         self.word_boundary_token = tokenizer.convert_tokens_to_ids("WORD_BOUNDARY")
 
     def __call__(self, examples):
+
+        # Make sure there's an utterance boundary at the end of each utterance
+        examples["text"] = [utt + " \n" for utt in examples["text"] if utt[-1] != "\n"]
+
         if self.join_utts == 'static':
             joined = " ".join([utt for utt in examples["text"]])
             joined = self.tokenizer(joined, truncation=False, padding=False)

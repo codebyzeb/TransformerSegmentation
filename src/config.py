@@ -37,6 +37,8 @@ class DatasetParams:
     name: str
     # subconfig i.e. full
     subconfig: str
+    # Max age of child
+    max_age: Optional[int] = None
 
 
 @dataclass
