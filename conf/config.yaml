@@ -6,14 +6,14 @@ defaults:
 dataset: 
   name: 'transformersegmentation/CHILDES'
   subconfig: 'English'
-  max_age: 24
+  max_age: 120
 
 experiment: 
   seed: 42 
 
 data_preprocessing:
   max_input_length: 64
-  #join_utts: None
+  join_utts: "static"
 
 tokenizer:
   name: 'transformersegmentation/CHILDES-Tokenizer' 

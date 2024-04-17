@@ -80,7 +80,7 @@ def main(cfg: TransformerSegmentationConfig):
 
     # Drop rows where target_child_age is none or is larger than the max_age
     if cfg.dataset.max_age is not None:
-        dataset = dataset.filter(lambda x: x["target_child_age"] is not None and x["target_child_age"] <= cfg.dataset.max_age, num_proc=64)
+        dataset = dataset.filter(lambda x: x["target_child_age"] is not None and x["target_child_age"] <= cfg.dataset.max_age, num_proc=1)
         
     # Rename "phonemized_utterance" to "text"
     dataset = dataset.rename_column("phonemized_utterance", "text")
@@ -97,7 +97,7 @@ def main(cfg: TransformerSegmentationConfig):
     # Get a sample of the validation set for evaluating segmentation. We do this before preprocessing because
     # preprocessing removes word boundaries, which we need as labels for evaluation.
     num_rows = dataset["valid"].num_rows
-    segment_eval_sentences = dataset["valid"].select(range(0, num_rows, num_rows//3000))["text"]
+    segment_eval_sentences = dataset["valid"]["text"]
 
     # Preprocess data
     logger.info("Preprocessing data")
@@ -169,7 +169,7 @@ def main(cfg: TransformerSegmentationConfig):
         max_steps=cfg.trainer.max_training_steps,
         warmup_steps=cfg.trainer.num_warmup_steps,
         seed=cfg.experiment.seed,
-        eval_steps=cfg.trainer.max_training_steps // (2 if cfg.experiment.dry_run else 50),  # evaluate every 2% of training
+        eval_steps=cfg.trainer.max_training_steps // (2 if cfg.experiment.dry_run else 20),  # evaluate every 5% of training
         save_steps=cfg.trainer.max_training_steps // (2 if cfg.experiment.dry_run else 10),  # checkpoint every 10% of training
         logging_steps=cfg.trainer.max_training_steps // 100,  # log every 1% of training
         run_name=cfg.experiment.name,
@@ -198,11 +198,15 @@ def main(cfg: TransformerSegmentationConfig):
         data_collator=data_collator,
     )
 
+    # Initial model evaluation
+    if not cfg.experiment.resume_checkpoint_path:
+        trainer.evaluate() 
+
     # Train model
     trainer.train(resume_from_checkpoint=cfg.experiment.resume_checkpoint_path)
 
     # Evaluate best model
-    trainer.stride_evaluation = 16
+    trainer.stride_evaluation = 2
     trainer.evaluate(metric_key_prefix="eval_best")
 
 

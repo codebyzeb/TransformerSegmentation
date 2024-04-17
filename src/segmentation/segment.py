@@ -9,6 +9,7 @@ from evaluate import load
 from torch.nn import CrossEntropyLoss
 import torch.nn.functional as F
 from tqdm import tqdm
+from scipy.optimize import minimize_scalar
 
 DEFAULT_DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -169,33 +170,57 @@ class Segmenter(object):
 
         raise NotImplementedError
 
-    def evaluate_cutoff_segmentation(self, measure, cutoffs):
-        """Given a measure and a range of cutoffs, segments according to the cutoff and evaluates the results.
+    def evaluate_cutoff_segmentation(self, measure, cutoff, subsample=1):
+        """Given a measure and a cutoff, segments by adding word boundaries whenever the measure is above the cutoff and evaluates the results.
+        
         Parameters
         ----------
         measure : str
             The measure to use for segmentation.
-        cutoffs : list
-            A list of cutoffs to use for segmentation.
+        cutoffs : float
+            The cutoff value used to place word boundaries in the segmentation.
 
         Returns
         -------
         results : pandas.DataFrame
-            A dataframe containing the results of segmentation for each cutoff.
+            A dataframe containing the results of segmentation.
         """
 
-        all_results = []
-        for cutoff in cutoffs:
-            segmented_utterances = segment_by_cutoff(self.processed_utterances, measure, cutoff).split(" UTT_BOUNDARY ")
-            results = self.metric.compute(
-                predictions=segmented_utterances,
-                references=self.gold_utterances,
-            )
-            results["Cutoff"] = cutoff
-            all_results.append(results)
+        segmented_utterances = segment_by_cutoff(self.processed_utterances, measure, cutoff).split(" UTT_BOUNDARY ")
+        results = self.metric.compute(
+            predictions=segmented_utterances[::subsample],
+            references=self.gold_utterances[::subsample],
+        )
 
-        logging.info("Segmented utterances for a range of cutoffs using measure: {}".format(measure))
-        return pd.DataFrame(all_results)
+        logging.debug("Segmented utterances using a cutoff of {} for measure: {}".format(cutoff, measure))
+        return results
+    
+    def find_best_cutoff(self, measure, score):
+        """Given a measure and a score, finds the cutoff value that maximises the segmentation score.
+
+        Subsamples processed_utterances by 10 to speed up the search.
+
+        Parameters
+        ----------
+        measure : str
+            The measure to use for segmentation.
+        score : str
+            The score to use for evaluation.
+
+        Returns
+        -------
+        best_cutoff : float
+            The best cutoff value for segmentation.
+        best_score : float
+            The resulting score for segmentation.
+        """
+        
+        min, max = self.processed_utterances[measure].min(), self.processed_utterances[measure].max()
+        fun = lambda x: -self.evaluate_cutoff_segmentation(measure=measure, cutoff=x, subsample=10)[score]
+        result = minimize_scalar(fun, bounds=(min, max), method='bounded')
+        logging.debug("Found best cutoff for measure {} using score {}: {}".format(measure, score, result.x))
+        final_score = self.evaluate_cutoff_segmentation(measure=measure, cutoff=result.x)[score]
+        return result.x, final_score
 
     def evaluate_spike_segmentation(self, measure):
         """Given a measure, segments according to spikes in the measure and evaluates the results.
@@ -212,9 +237,34 @@ class Segmenter(object):
 
         segmented_utterances = segment_by_spike(self.processed_utterances, measure).split(" UTT_BOUNDARY ")
 
-        logging.info("Segmented utterances according to spikes in measure: {}".format(measure))
+        logging.debug("Segmented utterances according to spikes in measure: {}".format(measure))
         return self.metric.compute(predictions=segmented_utterances, references=self.gold_utterances)
+    
+    def add_majority_vote(self, measure_cutoffs):
+        """ Given a set of measures and their respective cutoff values, calculates two types of majority votes
+        and adds them to the processed_utterance data.
+        
+        * The Majority Vote Cutoff measure indicates how many measures exceed their respective cutoffs at each position.
+        * The Majority Vote Spike measure indicates how many measures spike at each position.
+        
+        These measures are then normalised so that a vote above 0.5 indicates that the majority of measures agree.
 
+        Parameters
+        ----------
+        measures_cutoffs : dict
+            A dictionary containing the measure names as keys and their respective cutoff values as values.
+        """
+
+        self.processed_utterances['Majority Vote Cutoff'] = 0
+        self.processed_utterances['Majority Vote Spike'] = 0
+        for measure, cutoff in measure_cutoffs.items():
+            self.processed_utterances['Majority Vote Cutoff'] += (self.processed_utterances[measure] > cutoff).astype(int)
+            shift_left = self.processed_utterances[measure].shift(1)
+            shift_right = self.processed_utterances[measure].shift(-1)
+            self.processed_utterances['Majority Vote Spike'] += ((self.processed_utterances[measure] > shift_left) & (self.processed_utterances[measure] > shift_right)).astype(int)
+        num_measures = len(measure_cutoffs)
+        self.processed_utterances['Majority Vote Cutoff'] /= num_measures
+        self.processed_utterances['Majority Vote Spike'] /= num_measures
 
 class GPT2Segmenter(Segmenter):
     def get_uncertainties(self, phonemes):
