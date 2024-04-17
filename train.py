@@ -50,8 +50,10 @@ def main(cfg: TransformerSegmentationConfig):
     missing_keys: set[str] = OmegaConf.missing_keys(cfg)
     if missing_keys:
         raise RuntimeError(f"Missing keys in config: \n {missing_keys}")
-    if cfg.data_preprocessing.join_utts not in ["dynamic", "static", None]:
+    if cfg.data_preprocessing.join_utts not in ["dynamic", "static", None, "None"]:
         raise RuntimeError(f"Invalid value for join_utts: {cfg.data_preprocessing.join_utts}. Must be one of 'dynamic', 'static', or None.")
+    if cfg.data_preprocessing.join_utts == "None":
+        cfg.data_preprocessing.join_utts = None
 
     logger.info(f"Config: {OmegaConf.to_yaml(cfg)}")
 
@@ -112,6 +114,9 @@ def main(cfg: TransformerSegmentationConfig):
 
     train_dataset = processed_dataset["train"]
     eval_dataset = processed_dataset["valid"]
+    if cfg.dataset.num_examples is not None:
+        logger.info(f"Subsampling training dataset to {cfg.dataset.num_train_examples} examples, evenly spaced across the dataset.")
+        train_dataset = train_dataset.select(range(0, train_dataset.num_rows, train_dataset.num_rows // cfg.dataset.num_examples))
     if cfg.experiment.dry_run:
         logger.info(f"Running in dry run mode -- subsampling dataset by {DRY_RUN_SUBSAMPLE_FACTOR}x")
         train_dataset = train_dataset.select(range(0, train_dataset.num_rows, DRY_RUN_SUBSAMPLE_FACTOR))

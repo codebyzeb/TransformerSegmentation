@@ -39,7 +39,8 @@ class DatasetParams:
     subconfig: str
     # Max age of child
     max_age: Optional[int] = None
-
+    # Number of examples to use (override number of examples in dataset)
+    num_examples: Optional[int] = None
 
 @dataclass
 class TokenizerParams:
