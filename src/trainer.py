@@ -369,15 +369,15 @@ class CustomTrainer(Trainer):
                 segmenter.add_majority_vote(best_cutoffs_type)
                 output.metrics[f"{metric_key_prefix}_spike_seg_type_fscore_Majority Vote Cutoff"] = segmenter.evaluate_spike_segmentation('Majority Vote Cutoff')["type_fscore"]
                 output.metrics[f"{metric_key_prefix}_spike_seg_type_fscore_Majority Vote Spike"] = segmenter.evaluate_spike_segmentation('Majority Vote Spike')["type_fscore"]
-                output.metrics[f"{metric_key_prefix}_absolute_seg_type_fscore_Majority Vote Cutoff"] = segmenter.evaluate_cutoff_segmentation(measure, 0.5)["type_fscore"]
-                output.metrics[f"{metric_key_prefix}_absolute_seg_type_fscore_Majority Vote Spike"] = segmenter.evaluate_cutoff_segmentation(measure, 0.5)["type_fscore"]
+                output.metrics[f"{metric_key_prefix}_absolute_seg_type_fscore_Majority Vote Cutoff"] = segmenter.evaluate_cutoff_segmentation('Majority Vote Cutoff', 0.5)["type_fscore"]
+                output.metrics[f"{metric_key_prefix}_absolute_seg_type_fscore_Majority Vote Spike"] = segmenter.evaluate_cutoff_segmentation('Majority Vote Spike', 0.5)["type_fscore"]
 
                 # Add majority vote measures based on boundary fscore votes
                 segmenter.add_majority_vote(best_cutoffs_boundary)
                 output.metrics[f"{metric_key_prefix}_spike_seg_boundary_fscore_Majority Vote Cutoff"] = segmenter.evaluate_spike_segmentation('Majority Vote Cutoff')["boundary_noedge_fscore"]
                 output.metrics[f"{metric_key_prefix}_spike_seg_boundary_fscore_Majority Vote Spike"] = segmenter.evaluate_spike_segmentation('Majority Vote Spike')["boundary_noedge_fscore"]
-                output.metrics[f"{metric_key_prefix}_absolute_seg_boundary_fscore_Majority Vote Cutoff"] = segmenter.evaluate_cutoff_segmentation(measure, 0.5)["boundary_noedge_fscore"]
-                output.metrics[f"{metric_key_prefix}_absolute_seg_boundary_fscore_Majority Vote Spike"] = segmenter.evaluate_cutoff_segmentation(measure, 0.5)["boundary_noedge_fscore"]
+                output.metrics[f"{metric_key_prefix}_absolute_seg_boundary_fscore_Majority Vote Cutoff"] = segmenter.evaluate_cutoff_segmentation('Majority Vote Cutoff', 0.5)["boundary_noedge_fscore"]
+                output.metrics[f"{metric_key_prefix}_absolute_seg_boundary_fscore_Majority Vote Spike"] = segmenter.evaluate_cutoff_segmentation('Majority Vote Spike', 0.5)["boundary_noedge_fscore"]
 
             else:
                 logging.warning(f"No segmenter available for model class {model_class}, skipping segmentation evaluation")

@@ -42,7 +42,7 @@ def main(cfg: TransformerSegmentationConfig):
         "HF_READ_TOKEN" in os.environ and "HF_WRITE_TOKEN" in os.environ
     ), "HF_READ_TOKEN and HF_WRITE_TOKEN need to be set as environment variables"
 
-    if 'name' not in cfg.experiment.__dict__:
+    if 'name' not in cfg.experiment:
         # Set to dataset subconfig with random 5 digit number
         cfg.experiment.name = f"{cfg.dataset.subconfig}-{str(torch.randint(10000, (1,)).item()).zfill(5)}"
         logger.warning(f"experiment.name not set, using {cfg.experiment.name}")
@@ -98,7 +98,6 @@ def main(cfg: TransformerSegmentationConfig):
 
     # Get a sample of the validation set for evaluating segmentation. We do this before preprocessing because
     # preprocessing removes word boundaries, which we need as labels for evaluation.
-    num_rows = dataset["valid"].num_rows
     segment_eval_sentences = dataset["valid"]["text"]
 
     # Preprocess data
@@ -108,7 +107,7 @@ def main(cfg: TransformerSegmentationConfig):
     processed_dataset = dataset.map(
         data_preprocessor,
         batched=True,
-        # num_proc=64,
+        num_proc=64,
         remove_columns=["text", "target_child_age"],
     )
 
