@@ -10,6 +10,7 @@ from omegaconf import MISSING
 class ExperimentParams:
     seed: int
 
+
     # Name of the experiment - needs to be set at runtime
     name: str = MISSING
 
@@ -22,6 +23,9 @@ class ExperimentParams:
 
     # whether to run the experiment only offline
     offline_run: bool = False
+
+    # Whether to evaluate the segmentation task
+    evaluate_segmentation: bool = True
 
     # Optional checkpoint path to resume training from
     resume_checkpoint_path: Optional[str] = None

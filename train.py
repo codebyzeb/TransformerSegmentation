@@ -98,7 +98,7 @@ def main(cfg: TransformerSegmentationConfig):
 
     # Get a sample of the validation set for evaluating segmentation. We do this before preprocessing because
     # preprocessing removes word boundaries, which we need as labels for evaluation.
-    segment_eval_sentences = dataset["valid"]["text"]
+    segment_eval_sentences = dataset["valid"]["text"] if cfg.experiment.evaluate_segmentation else None
 
     # Preprocess data
     logger.info("Preprocessing data")

@@ -10,10 +10,11 @@ dataset:
 
 experiment: 
   seed: 42 
+  evaluate_segmentation: True
 
 data_preprocessing:
   max_input_length: 64
-  join_utts: "static"
+  join_utts: "dynamic"
 
 tokenizer:
   name: 'transformersegmentation/CHILDES-Tokenizer' 
