@@ -21,7 +21,8 @@ from transformers.utils import get_full_repo_name, is_datasets_available
 
 from .config import TransformerSegmentationConfig
 from .datasampler import CustomBatchSampler
-from .segmentation.segment import GPT2FeaturesSegmenter, GPT2Segmenter
+from .evaluation.segmentation.segment import GPT2FeaturesSegmenter, GPT2Segmenter
+from .evaluation.babyslm.babyslm import babyslm_evaluation
 
 SEGMENTER_MAP = {
     "GPT2LMHeadModel": GPT2Segmenter,
@@ -51,6 +52,7 @@ class CustomTrainer(Trainer):
 
         self.hydra_config = hydra_config
         self.max_seq_length = hydra_config.data_preprocessing.max_input_length
+        self.do_babyslm_evaluation = hydra_config.experiment.evaluate_babyslm
         self.segment_eval_sentences = segment_eval_sentences
 
         self.experiment_group = hydra_config.experiment.group
@@ -269,6 +271,8 @@ class CustomTrainer(Trainer):
             metric_key_prefix=metric_key_prefix,
         )
 
+        metrics = output.metrics if output.metrics is not None else {}
+
         if self.stride_evaluation is not None:
             # Create longs vector with all input ids and labels in eval_dataset
             long_input_ids = []
@@ -334,18 +338,18 @@ class CustomTrainer(Trainer):
             nlls = [nll for nll in nlls if not torch.isnan(nll)]
             ppl = torch.exp(torch.stack(nlls).mean())
             bpc = torch.stack(nlls).mean() / math.log(2)
-            output.metrics[f"{metric_key_prefix}_stride_perplexity"] = ppl
-            output.metrics[f"{metric_key_prefix}_stride_bpc"] = bpc
+            metrics[f"{metric_key_prefix}_stride_perplexity"] = ppl.item()
+            metrics[f"{metric_key_prefix}_stride_bpc"] = bpc.item()
 
         # Get perplexity on evaluation set
-        eval_loss = output.metrics[f"{metric_key_prefix}_loss"]
+        eval_loss = metrics[f"{metric_key_prefix}_loss"]
         perplexity = math.exp(eval_loss)
-        output.metrics[f"{metric_key_prefix}_perplexity"] = perplexity
+        metrics[f"{metric_key_prefix}_perplexity"] = perplexity
 
         # Get bits per character on evaluation set
-        eval_loss = output.metrics[f"{metric_key_prefix}_loss"]
+        eval_loss = metrics[f"{metric_key_prefix}_loss"]
         bits_per_character = eval_loss / math.log(2)
-        output.metrics[f"{metric_key_prefix}_bpc"] = bits_per_character
+        metrics[f"{metric_key_prefix}_bpc"] = bits_per_character
 
         # Evaluate word segmentation on the segmentation evaluation sentences
         if self.segment_eval_sentences:
@@ -356,45 +360,50 @@ class CustomTrainer(Trainer):
                 best_cutoffs_boundary = {}
                 for measure in tqdm(segmenter.measures, desc="Evaluating segmentation measures"):
                     spike_seg_metrics = segmenter.evaluate_spike_segmentation(measure)
-                    output.metrics[f"{metric_key_prefix}_spike_seg_type_fscore_{measure}"] = spike_seg_metrics["type_fscore"]
-                    output.metrics[f"{metric_key_prefix}_spike_seg_boundary_fscore_{measure}"] = spike_seg_metrics["boundary_noedge_fscore"]
+                    metrics[f"{metric_key_prefix}_spike_seg_type_fscore_{measure}"] = spike_seg_metrics["type_fscore"]
+                    metrics[f"{metric_key_prefix}_spike_seg_boundary_fscore_{measure}"] = spike_seg_metrics["boundary_noedge_fscore"]
 
                     best_cutoffs_type[measure], type_fscore = segmenter.find_best_cutoff(measure, 'type_fscore')
-                    output.metrics[f"{metric_key_prefix}_absolute_seg_type_fscore_{measure}"] = type_fscore
+                    metrics[f"{metric_key_prefix}_absolute_seg_type_fscore_{measure}"] = type_fscore
                     
                     best_cutoffs_boundary[measure], boundary_fscore = segmenter.find_best_cutoff(measure, 'boundary_noedge_fscore')
-                    output.metrics[f"{metric_key_prefix}_absolute_seg_boundary_fscore_{measure}"] = boundary_fscore
+                    metrics[f"{metric_key_prefix}_absolute_seg_boundary_fscore_{measure}"] = boundary_fscore
 
                 # Add majority vote measures based on type fscore votes
                 segmenter.add_majority_vote(best_cutoffs_type)
-                output.metrics[f"{metric_key_prefix}_spike_seg_type_fscore_Majority Vote Cutoff"] = segmenter.evaluate_spike_segmentation('Majority Vote Cutoff')["type_fscore"]
-                output.metrics[f"{metric_key_prefix}_spike_seg_type_fscore_Majority Vote Spike"] = segmenter.evaluate_spike_segmentation('Majority Vote Spike')["type_fscore"]
-                output.metrics[f"{metric_key_prefix}_absolute_seg_type_fscore_Majority Vote Cutoff"] = segmenter.evaluate_cutoff_segmentation('Majority Vote Cutoff', 0.5)["type_fscore"]
-                output.metrics[f"{metric_key_prefix}_absolute_seg_type_fscore_Majority Vote Spike"] = segmenter.evaluate_cutoff_segmentation('Majority Vote Spike', 0.5)["type_fscore"]
+                metrics[f"{metric_key_prefix}_spike_seg_type_fscore_Majority Vote Cutoff"] = segmenter.evaluate_spike_segmentation('Majority Vote Cutoff')["type_fscore"]
+                metrics[f"{metric_key_prefix}_spike_seg_type_fscore_Majority Vote Spike"] = segmenter.evaluate_spike_segmentation('Majority Vote Spike')["type_fscore"]
+                metrics[f"{metric_key_prefix}_absolute_seg_type_fscore_Majority Vote Cutoff"] = segmenter.evaluate_cutoff_segmentation('Majority Vote Cutoff', 0.5)["type_fscore"]
+                metrics[f"{metric_key_prefix}_absolute_seg_type_fscore_Majority Vote Spike"] = segmenter.evaluate_cutoff_segmentation('Majority Vote Spike', 0.5)["type_fscore"]
 
                 # Add majority vote measures based on boundary fscore votes
                 segmenter.add_majority_vote(best_cutoffs_boundary)
-                output.metrics[f"{metric_key_prefix}_spike_seg_boundary_fscore_Majority Vote Cutoff"] = segmenter.evaluate_spike_segmentation('Majority Vote Cutoff')["boundary_noedge_fscore"]
-                output.metrics[f"{metric_key_prefix}_spike_seg_boundary_fscore_Majority Vote Spike"] = segmenter.evaluate_spike_segmentation('Majority Vote Spike')["boundary_noedge_fscore"]
-                output.metrics[f"{metric_key_prefix}_absolute_seg_boundary_fscore_Majority Vote Cutoff"] = segmenter.evaluate_cutoff_segmentation('Majority Vote Cutoff', 0.5)["boundary_noedge_fscore"]
-                output.metrics[f"{metric_key_prefix}_absolute_seg_boundary_fscore_Majority Vote Spike"] = segmenter.evaluate_cutoff_segmentation('Majority Vote Spike', 0.5)["boundary_noedge_fscore"]
+                metrics[f"{metric_key_prefix}_spike_seg_boundary_fscore_Majority Vote Cutoff"] = segmenter.evaluate_spike_segmentation('Majority Vote Cutoff')["boundary_noedge_fscore"]
+                metrics[f"{metric_key_prefix}_spike_seg_boundary_fscore_Majority Vote Spike"] = segmenter.evaluate_spike_segmentation('Majority Vote Spike')["boundary_noedge_fscore"]
+                metrics[f"{metric_key_prefix}_absolute_seg_boundary_fscore_Majority Vote Cutoff"] = segmenter.evaluate_cutoff_segmentation('Majority Vote Cutoff', 0.5)["boundary_noedge_fscore"]
+                metrics[f"{metric_key_prefix}_absolute_seg_boundary_fscore_Majority Vote Spike"] = segmenter.evaluate_cutoff_segmentation('Majority Vote Spike', 0.5)["boundary_noedge_fscore"]
 
             else:
                 logging.warning(f"No segmenter available for model class {model_class}, skipping segmentation evaluation")
 
+        if self.do_babyslm_evaluation:
+            # Evaluate BabySLM
+            metrics[f'{metric_key_prefix}_babyslm_lexical'] = babyslm_evaluation(self.model, self.tokenizer, Path(self.args.output_dir), 'lexical')
+            metrics[f'{metric_key_prefix}_babyslm_syntactic'] = babyslm_evaluation(self.model, self.tokenizer, Path(self.args.output_dir), 'syntactic')
+
         total_batch_size = self.args.eval_batch_size * self.args.world_size
-        if f"{metric_key_prefix}_jit_compilation_time" in output.metrics:
-            start_time += output.metrics[f"{metric_key_prefix}_jit_compilation_time"]
-        output.metrics.update(
+        if f"{metric_key_prefix}_jit_compilation_time" in metrics:
+            start_time += metrics[f"{metric_key_prefix}_jit_compilation_time"]
+        metrics.update(
             speed_metrics(
                 metric_key_prefix,
                 start_time,
                 num_samples=output.num_samples,
                 num_steps=math.ceil(output.num_samples / total_batch_size),
-            )
-        )
+            ) # type: ignore
+        ) # type: ignore
 
-        self.log(output.metrics)
+        self.log(metrics)
 
         self.control = self.callback_handler.on_evaluate(self.args, self.state, self.control, output.metrics)
 

@@ -27,6 +27,9 @@ class ExperimentParams:
     # Whether to evaluate the segmentation task
     evaluate_segmentation: bool = True
 
+    # Whether to evaluate the babyslm tasks
+    evaluate_babyslm: bool = False
+
     # Optional checkpoint path to resume training from
     resume_checkpoint_path: Optional[str] = None
 

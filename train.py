@@ -52,6 +52,8 @@ def main(cfg: TransformerSegmentationConfig):
         raise RuntimeError(f"Missing keys in config: \n {missing_keys}")
     if cfg.data_preprocessing.join_utts not in ["dynamic", "static", None, "None"]:
         raise RuntimeError(f"Invalid value for join_utts: {cfg.data_preprocessing.join_utts}. Must be one of 'dynamic', 'static', or None.")
+    if cfg.experiment.evaluate_babyslm and 'English' not in cfg.dataset.subconfig:
+        raise RuntimeError("evaluate_babyslm is only supported for the English dataset.")
     if cfg.data_preprocessing.join_utts == "None":
         cfg.data_preprocessing.join_utts = None
 
@@ -82,7 +84,7 @@ def main(cfg: TransformerSegmentationConfig):
 
     # Drop rows where target_child_age is none or is larger than the max_age
     if cfg.dataset.max_age is not None:
-        dataset = dataset.filter(lambda x: x["target_child_age"] is not None and x["target_child_age"] <= cfg.dataset.max_age, num_proc=1)
+        dataset = dataset.filter(lambda x: x["target_child_age"] is not None and x["target_child_age"] <= cfg.dataset.max_age, num_proc=64)
         
     # Rename "phonemized_utterance" to "text"
     dataset = dataset.rename_column("phonemized_utterance", "text")
