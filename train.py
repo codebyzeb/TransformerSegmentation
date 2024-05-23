@@ -2,17 +2,17 @@
 
 import logging
 import os
-import torch
 
 # config-related imports
 import hydra
+import torch
 
 # training pipeline imports
-from datasets import load_dataset, Features, Value
+from datasets import Features, Value, load_dataset
 from hydra.core.config_store import ConfigStore
 from omegaconf import OmegaConf
-from transformers.trainer import TrainingArguments
 from transformers.data import DataCollatorForLanguageModeling
+from transformers.trainer import TrainingArguments
 
 # wandb for logging metrics
 import wandb
@@ -42,7 +42,7 @@ def main(cfg: TransformerSegmentationConfig):
         "HF_READ_TOKEN" in os.environ and "HF_WRITE_TOKEN" in os.environ
     ), "HF_READ_TOKEN and HF_WRITE_TOKEN need to be set as environment variables"
 
-    if 'name' not in cfg.experiment:
+    if "name" not in cfg.experiment:
         # Set to dataset subconfig with random 5 digit number
         cfg.experiment.name = f"{cfg.dataset.subconfig}-{str(torch.randint(10000, (1,)).item()).zfill(5)}"
         logger.warning(f"experiment.name not set, using {cfg.experiment.name}")
@@ -52,7 +52,7 @@ def main(cfg: TransformerSegmentationConfig):
         raise RuntimeError(f"Missing keys in config: \n {missing_keys}")
     if cfg.data_preprocessing.join_utts not in ["dynamic", "static", None, "None"]:
         raise RuntimeError(f"Invalid value for join_utts: {cfg.data_preprocessing.join_utts}. Must be one of 'dynamic', 'static', or None.")
-    if cfg.experiment.evaluate_babyslm and 'English' not in cfg.dataset.subconfig:
+    if cfg.experiment.evaluate_babyslm and "English" not in cfg.dataset.subconfig:
         raise RuntimeError("evaluate_babyslm is only supported for the English dataset.")
     if cfg.data_preprocessing.join_utts == "None":
         cfg.data_preprocessing.join_utts = None
@@ -77,7 +77,7 @@ def main(cfg: TransformerSegmentationConfig):
     dataset = load_dataset(
         cfg.dataset.name,
         cfg.dataset.subconfig,
-        use_auth_token=os.environ["HF_READ_TOKEN"],
+        token=os.environ["HF_READ_TOKEN"],
         column_names=load_columns,
         features=features,
     )
@@ -85,7 +85,7 @@ def main(cfg: TransformerSegmentationConfig):
     # Drop rows where target_child_age is none or is larger than the max_age
     if cfg.dataset.max_age is not None:
         dataset = dataset.filter(lambda x: x["target_child_age"] is not None and x["target_child_age"] <= cfg.dataset.max_age, num_proc=64)
-        
+
     # Rename "phonemized_utterance" to "text"
     dataset = dataset.rename_column("phonemized_utterance", "text")
 
@@ -124,7 +124,7 @@ def main(cfg: TransformerSegmentationConfig):
         eval_dataset = eval_dataset.select(range(0, eval_dataset.num_rows, DRY_RUN_SUBSAMPLE_FACTOR))
 
     # Set up custom data collator which joins examples to fill the context size
-    if cfg.data_preprocessing.join_utts == 'dynamic':
+    if cfg.data_preprocessing.join_utts == "dynamic":
         data_collator = CustomDataCollatorForLanguageModeling(tokenizer, max_seq_length=cfg.data_preprocessing.max_input_length, mlm=False)
     else:
         data_collator = DataCollatorForLanguageModeling(tokenizer, mlm=False)
@@ -206,7 +206,7 @@ def main(cfg: TransformerSegmentationConfig):
 
     # Initial model evaluation
     if not cfg.experiment.resume_checkpoint_path:
-        trainer.evaluate() 
+        trainer.evaluate()
 
     # Train model
     trainer.train(resume_from_checkpoint=cfg.experiment.resume_checkpoint_path)
