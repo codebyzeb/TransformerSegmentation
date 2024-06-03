@@ -23,15 +23,23 @@ LEXICAL_GOLD_DATA = "data/babyslm/lexical/dev/gold.csv"
 SYNTACTIC_GOLD_DATA = "data/babyslm/syntactic/dev/gold.csv"
 
 
-def extract_probabilities(examples, model, tokenizer):
-    tokenized = [tokenizer(transcription, return_tensors="pt") for transcription in examples]
+def extract_probabilities(examples, model, tokenizer, batch_size=16):
+    tokenized = tokenizer(examples, return_tensors="pt", padding=True, truncation=True)
     probabilities = []
-    for i in tqdm.tqdm(range(len(examples))):
-        input_ids = tokenized[i]["input_ids"].to(model.device)
-        attention_mask = tokenized[i]["attention_mask"].to(model.device)
+    for i in tqdm.tqdm(range(0, len(examples), batch_size)):
+        size = min(batch_size, len(examples) - i)
+        input_ids = tokenized["input_ids"][i : i + size].to(model.device)
+        attention_mask = tokenized["attention_mask"][i : i + size].to(model.device)
         with torch.no_grad():
             outputs = model(input_ids, attention_mask=attention_mask, labels=input_ids, return_dict=True)
-            probabilities.append(-outputs.loss.item())
+        shift_logits = outputs.logits[..., :-1, :].contiguous()
+        shift_labels = input_ids[..., 1:].contiguous()
+        loss_fct = torch.nn.CrossEntropyLoss(reduction="none", ignore_index=tokenizer.pad_token_id)
+        loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+        loss = loss.view(input_ids.size(0), input_ids.size(1) - 1)  # Reshape to get loss for each token in each sequence
+        loss = loss.sum(dim=1) / (loss != 0).sum(dim=1)  # Normalize by number of non-padding tokens
+        probabilities.extend(-loss.cpu().numpy())
+
     return probabilities
 
 
