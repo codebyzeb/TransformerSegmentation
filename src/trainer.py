@@ -229,7 +229,6 @@ class CustomTrainer(Trainer):
             pin_memory=self.args.dataloader_pin_memory,
         )
 
-    # Override evaluate to do word segmentation
     def evaluate(
         self,
         eval_dataset=None,
@@ -237,7 +236,8 @@ class CustomTrainer(Trainer):
         metric_key_prefix: str = "eval",
     ):
         """
-        Run evaluation and returns metrics.
+        Run evaluation and returns metrics. Overriden to add segmentation and BabySLM evaluation.
+
         The calling script will be responsible for providing a method to compute metrics, as they are task-dependent
         (pass it to the init `compute_metrics` argument).
         You can also subclass and override this method to inject custom behavior.
@@ -273,74 +273,6 @@ class CustomTrainer(Trainer):
 
         metrics = output.metrics if output.metrics is not None else {}
 
-        if self.stride_evaluation is not None:
-            # Create longs vector with all input ids and labels in eval_dataset
-            long_input_ids = []
-            for batch in eval_dataloader:
-                long_input_ids.extend(batch["input_ids"].flatten().tolist())
-            long_input_ids = torch.tensor(long_input_ids).to(self.args.device)
-            long_target_ids = []
-            for batch in eval_dataloader:
-                long_target_ids.extend(batch["labels"].flatten().tolist())
-            long_target_ids = torch.tensor(long_target_ids).to(self.args.device)
-
-            max_length = self.max_seq_length
-            stride = self.stride_evaluation
-            input_id_length = len(long_input_ids)
-            logger.info("Evaluating perplexity with stride %d and max length %d" % (stride, max_length))
-
-            # Batch the input ids and labels into sequences of length max_length by shifting by stride
-            input_ids = []
-            target_ids = []
-            prev_end_loc = 0
-            batch_size = self.args.eval_batch_size
-            for begin_loc in range(0, len(long_input_ids), stride):
-                end_loc = min(begin_loc + max_length, len(long_input_ids))
-                trg_len = end_loc - prev_end_loc  # may be different from stride on last loop
-                inputs = long_input_ids[begin_loc:end_loc].to(self.args.device)
-                targets = long_target_ids[begin_loc:end_loc].to(self.args.device).clone()
-                targets[:-trg_len] = -100
-                input_ids.append(inputs)
-                target_ids.append(targets)
-                prev_end_loc = end_loc
-                if end_loc == input_id_length:
-                    # Ensure final set of input_ids is the same length as the rest
-                    input_ids[-1] = torch.cat((input_ids[-1], torch.zeros(stride - trg_len, dtype=torch.long, device=self.args.device)))
-                    target_ids[-1] = torch.cat(
-                        (target_ids[-1], torch.ones(stride - trg_len, dtype=torch.long, device=self.args.device) * -100)
-                    )
-                    break
-
-            # Ensure divisible by batch_size
-            while len(input_ids) % batch_size != 0:
-                input_ids.append(torch.zeros_like(input_ids[0]))
-                # Set to -100 for targets
-                target_ids.append(torch.ones_like(target_ids[0]) * -100)
-
-            # Stack into batches of batch_size
-            input_ids = torch.stack(input_ids)
-            target_ids = torch.stack(target_ids)
-            input_ids = input_ids.view(-1, batch_size, max_length)
-            target_ids = target_ids.view(-1, batch_size, max_length)
-            seq_len = input_ids.size(0)
-
-            nlls = []
-            for i in tqdm(range(seq_len)):
-                with torch.no_grad():
-                    outputs = self.model(input_ids[i], labels=target_ids[i])
-                    # loss is calculated using CrossEntropyLoss which averages over valid labels
-                    # N.B. the model only calculates loss over trg_len - 1 labels, because it internally shifts the labels
-                    # to the left by 1.
-                    neg_log_likelihood = outputs.loss
-
-                nlls.append(neg_log_likelihood)
-
-            nlls = [nll for nll in nlls if not torch.isnan(nll)]
-            ppl = torch.exp(torch.stack(nlls).mean())
-            bpc = torch.stack(nlls).mean() / math.log(2)
-            metrics[f"{metric_key_prefix}_stride_perplexity"] = ppl.item()
-            metrics[f"{metric_key_prefix}_stride_bpc"] = bpc.item()
-
         # Get perplexity on evaluation set
         eval_loss = metrics[f"{metric_key_prefix}_loss"]
         perplexity = math.exp(eval_loss)
@@ -351,45 +283,14 @@ class CustomTrainer(Trainer):
         bits_per_character = eval_loss / math.log(2)
         metrics[f"{metric_key_prefix}_bpc"] = bits_per_character
 
-        # Evaluate word segmentation on the segmentation evaluation sentences
+        if self.stride_evaluation is not None:
+            metrics.update(self.stride_evaluate(eval_dataloader, metric_key_prefix, stride=self.stride_evaluation))
+
         if self.segment_eval_sentences:
-            model_class = self.model.__class__.__name__
-            if model_class in SEGMENTER_MAP:
-                segmenter = SEGMENTER_MAP[model_class](self.model, self.tokenizer, self.segment_eval_sentences)
-                best_cutoffs_type = {}
-                best_cutoffs_boundary = {}
-                for measure in tqdm(segmenter.measures, desc="Evaluating segmentation measures"):
-                    spike_seg_metrics = segmenter.evaluate_spike_segmentation(measure)
-                    metrics[f"{metric_key_prefix}_spike_seg_type_fscore_{measure}"] = spike_seg_metrics["type_fscore"]
-                    metrics[f"{metric_key_prefix}_spike_seg_boundary_fscore_{measure}"] = spike_seg_metrics["boundary_noedge_fscore"]
-
-                    best_cutoffs_type[measure], type_fscore = segmenter.find_best_cutoff(measure, 'type_fscore')
-                    metrics[f"{metric_key_prefix}_absolute_seg_type_fscore_{measure}"] = type_fscore
-                    
-                    best_cutoffs_boundary[measure], boundary_fscore = segmenter.find_best_cutoff(measure, 'boundary_noedge_fscore')
-                    metrics[f"{metric_key_prefix}_absolute_seg_boundary_fscore_{measure}"] = boundary_fscore
-
-                # Add majority vote measures based on type fscore votes
-                segmenter.add_majority_vote(best_cutoffs_type)
-                metrics[f"{metric_key_prefix}_spike_seg_type_fscore_Majority Vote Cutoff"] = segmenter.evaluate_spike_segmentation('Majority Vote Cutoff')["type_fscore"]
-                metrics[f"{metric_key_prefix}_spike_seg_type_fscore_Majority Vote Spike"] = segmenter.evaluate_spike_segmentation('Majority Vote Spike')["type_fscore"]
-                metrics[f"{metric_key_prefix}_absolute_seg_type_fscore_Majority Vote Cutoff"] = segmenter.evaluate_cutoff_segmentation('Majority Vote Cutoff', 0.5)["type_fscore"]
-                metrics[f"{metric_key_prefix}_absolute_seg_type_fscore_Majority Vote Spike"] = segmenter.evaluate_cutoff_segmentation('Majority Vote Spike', 0.5)["type_fscore"]
-
-                # Add majority vote measures based on boundary fscore votes
-                segmenter.add_majority_vote(best_cutoffs_boundary)
-                metrics[f"{metric_key_prefix}_spike_seg_boundary_fscore_Majority Vote Cutoff"] = segmenter.evaluate_spike_segmentation('Majority Vote Cutoff')["boundary_noedge_fscore"]
-                metrics[f"{metric_key_prefix}_spike_seg_boundary_fscore_Majority Vote Spike"] = segmenter.evaluate_spike_segmentation('Majority Vote Spike')["boundary_noedge_fscore"]
-                metrics[f"{metric_key_prefix}_absolute_seg_boundary_fscore_Majority Vote Cutoff"] = segmenter.evaluate_cutoff_segmentation('Majority Vote Cutoff', 0.5)["boundary_noedge_fscore"]
-                metrics[f"{metric_key_prefix}_absolute_seg_boundary_fscore_Majority Vote Spike"] = segmenter.evaluate_cutoff_segmentation('Majority Vote Spike', 0.5)["boundary_noedge_fscore"]
-
-            else:
-                logging.warning(f"No segmenter available for model class {model_class}, skipping segmentation evaluation")
+            metrics.update(self.evaluate_segmentation(metric_key_prefix))
 
         if self.do_babyslm_evaluation:
-            # Evaluate BabySLM
-            metrics[f'{metric_key_prefix}_babyslm_lexical'] = babyslm_evaluation(self.model, self.tokenizer, Path(self.args.output_dir), 'lexical')
-            metrics[f'{metric_key_prefix}_babyslm_syntactic'] = babyslm_evaluation(self.model, self.tokenizer, Path(self.args.output_dir), 'syntactic')
+            metrics.update(self.evaluate_babyslm(metric_key_prefix))
 
         total_batch_size = self.args.eval_batch_size * self.args.world_size
         if f"{metric_key_prefix}_jit_compilation_time" in metrics:
@@ -399,14 +300,125 @@ class CustomTrainer(Trainer):
                 metric_key_prefix,
                 start_time,
                 num_samples=output.num_samples,
-                num_steps=math.ceil(output.num_samples / total_batch_size),
+                num_steps=math.ceil(output.num_samples / total_batch_size), # type: ignore
             ) # type: ignore
         ) # type: ignore
-
         self.log(metrics)
-
         self.control = self.callback_handler.on_evaluate(self.args, self.state, self.control, output.metrics)
-
         self._memory_tracker.stop_and_update_metrics(output.metrics)
 
         return output.metrics
+    
+    def stride_evaluate(self, eval_dataloader, metric_key_prefix, stride: int = 2):
+        """ Evaluate perplexity on evaluation set with stride """
+        # Create longs vector with all input ids and labels in eval_dataset
+        long_input_ids = []
+        for batch in eval_dataloader:
+            long_input_ids.extend(batch["input_ids"].flatten().tolist())
+        long_input_ids = torch.tensor(long_input_ids).to(self.args.device)
+        long_target_ids = []
+        for batch in eval_dataloader:
+            long_target_ids.extend(batch["labels"].flatten().tolist())
+        long_target_ids = torch.tensor(long_target_ids).to(self.args.device)
+
+        max_length = self.max_seq_length
+        input_id_length = len(long_input_ids)
+        logger.info("Evaluating perplexity with stride %d and max length %d" % (stride, max_length))
+
+        # Batch the input ids and labels into sequences of length max_length by shifting by stride
+        input_ids = []
+        target_ids = []
+        prev_end_loc = 0
+        batch_size = self.args.eval_batch_size
+        for begin_loc in range(0, len(long_input_ids), stride):
+            end_loc = min(begin_loc + max_length, len(long_input_ids))
+            trg_len = end_loc - prev_end_loc  # may be different from stride on last loop
+            inputs = long_input_ids[begin_loc:end_loc].to(self.args.device)
+            targets = long_target_ids[begin_loc:end_loc].to(self.args.device).clone()
+            targets[:-trg_len] = -100
+            input_ids.append(inputs)
+            target_ids.append(targets)
+            prev_end_loc = end_loc
+            if end_loc == input_id_length:
+                # Ensure final set of input_ids is the same length as the rest
+                input_ids[-1] = torch.cat((input_ids[-1], torch.zeros(stride - trg_len, dtype=torch.long, device=self.args.device)))
+                target_ids[-1] = torch.cat(
+                    (target_ids[-1], torch.ones(stride - trg_len, dtype=torch.long, device=self.args.device) * -100)
+                )
+                break
+
+        # Ensure divisible by batch_size
+        while len(input_ids) % batch_size != 0:
+            input_ids.append(torch.zeros_like(input_ids[0]))
+            # Set to -100 for targets
+            target_ids.append(torch.ones_like(target_ids[0]) * -100)
+
+        # Stack into batches of batch_size
+        input_ids = torch.stack(input_ids)
+        target_ids = torch.stack(target_ids)
+        input_ids = input_ids.view(-1, batch_size, max_length)
+        target_ids = target_ids.view(-1, batch_size, max_length)
+        seq_len = input_ids.size(0)
+
+        nlls = []
+        for i in tqdm(range(seq_len)):
+            with torch.no_grad():
+                outputs = self.model(input_ids[i], labels=target_ids[i])
+                # loss is calculated using CrossEntropyLoss which averages over valid labels
+                # N.B. the model only calculates loss over trg_len - 1 labels, because it internally shifts the labels
+                # to the left by 1.
+                neg_log_likelihood = outputs.loss
+
+            nlls.append(neg_log_likelihood)
+
+        nlls = [nll for nll in nlls if not torch.isnan(nll)]
+        ppl = torch.exp(torch.stack(nlls).mean())
+        bpc = torch.stack(nlls).mean() / math.log(2)
+        metrics = {}
+        metrics[f"{metric_key_prefix}_stride_perplexity"] = ppl.item()
+        metrics[f"{metric_key_prefix}_stride_bpc"] = bpc.item()
+        return metrics
+
+    def evaluate_segmentation(self, metric_key_prefix):
+        """ Evaluate segmentation on the evaluation sentences """
+        metrics = {}
+        model_class = self.model.__class__.__name__
+        if model_class in SEGMENTER_MAP:
+            segmenter = SEGMENTER_MAP[model_class](self.model, self.tokenizer, self.segment_eval_sentences)
+            best_cutoffs_type = {}
+            best_cutoffs_boundary = {}
+            for measure in tqdm(segmenter.measures, desc="Evaluating segmentation measures"):
+                spike_seg_metrics = segmenter.evaluate_spike_segmentation(measure)
+                metrics[f"{metric_key_prefix}_spike_seg_type_fscore_{measure}"] = spike_seg_metrics["type_fscore"]
+                metrics[f"{metric_key_prefix}_spike_seg_boundary_fscore_{measure}"] = spike_seg_metrics["boundary_noedge_fscore"]
+
+                best_cutoffs_type[measure], type_fscore = segmenter.find_best_cutoff(measure, 'type_fscore')
+                metrics[f"{metric_key_prefix}_absolute_seg_type_fscore_{measure}"] = type_fscore
+                
+                best_cutoffs_boundary[measure], boundary_fscore = segmenter.find_best_cutoff(measure, 'boundary_noedge_fscore')
+                metrics[f"{metric_key_prefix}_absolute_seg_boundary_fscore_{measure}"] = boundary_fscore
+
+            # Add majority vote measures based on type fscore votes
+            segmenter.add_majority_vote(best_cutoffs_type)
+            metrics[f"{metric_key_prefix}_spike_seg_type_fscore_Majority Vote Cutoff"] = segmenter.evaluate_spike_segmentation('Majority Vote Cutoff')["type_fscore"]
+            metrics[f"{metric_key_prefix}_spike_seg_type_fscore_Majority Vote Spike"] = segmenter.evaluate_spike_segmentation('Majority Vote Spike')["type_fscore"]
+            metrics[f"{metric_key_prefix}_absolute_seg_type_fscore_Majority Vote Cutoff"] = segmenter.evaluate_cutoff_segmentation('Majority Vote Cutoff', 0.5)["type_fscore"]
+            metrics[f"{metric_key_prefix}_absolute_seg_type_fscore_Majority Vote Spike"] = segmenter.evaluate_cutoff_segmentation('Majority Vote Spike', 0.5)["type_fscore"]
+
+            # Add majority vote measures based on boundary fscore votes
+            segmenter.add_majority_vote(best_cutoffs_boundary)
+            metrics[f"{metric_key_prefix}_spike_seg_boundary_fscore_Majority Vote Cutoff"] = segmenter.evaluate_spike_segmentation('Majority Vote Cutoff')["boundary_noedge_fscore"]
+            metrics[f"{metric_key_prefix}_spike_seg_boundary_fscore_Majority Vote Spike"] = segmenter.evaluate_spike_segmentation('Majority Vote Spike')["boundary_noedge_fscore"]
+            metrics[f"{metric_key_prefix}_absolute_seg_boundary_fscore_Majority Vote Cutoff"] = segmenter.evaluate_cutoff_segmentation('Majority Vote Cutoff', 0.5)["boundary_noedge_fscore"]
+            metrics[f"{metric_key_prefix}_absolute_seg_boundary_fscore_Majority Vote Spike"] = segmenter.evaluate_cutoff_segmentation('Majority Vote Spike', 0.5)["boundary_noedge_fscore"]
+        else:
+            logging.warning(f"No segmenter available for model class {model_class}, skipping segmentation evaluation")
+
+        return metrics
+    
+    def evaluate_babyslm(self, metric_key_prefix):
+        """ Evaluate on BabySLM tasks """
+        metrics = {}
+        metrics[f'{metric_key_prefix}_babyslm_lexical'] = babyslm_evaluation(self.model, self.tokenizer, Path(self.args.output_dir), 'lexical')
+        metrics[f'{metric_key_prefix}_babyslm_syntactic'] = babyslm_evaluation(self.model, self.tokenizer, Path(self.args.output_dir), 'syntactic')
+        return metrics

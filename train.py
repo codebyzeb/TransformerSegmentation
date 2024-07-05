@@ -84,7 +84,7 @@ def main(cfg: TransformerSegmentationConfig):
 
     # Drop rows where target_child_age is none or is larger than the max_age
     if cfg.dataset.max_age is not None:
-        dataset = dataset.filter(lambda x: x["target_child_age"] is not None and x["target_child_age"] <= cfg.dataset.max_age, num_proc=64)
+        dataset = dataset.filter(lambda x: x["target_child_age"] is not None and x["target_child_age"] <= cfg.dataset.max_age, num_proc=(64 if torch.cuda.is_available() else 1))
 
     # Rename "phonemized_utterance" to "text"
     dataset = dataset.rename_column("phonemized_utterance", "text")
@@ -98,6 +98,10 @@ def main(cfg: TransformerSegmentationConfig):
     logger.info("Initializing model")
     model = load_model(cfg, tokenizer)
 
+    # Report number of parameters
+    num_params = sum(p.numel() for p in model.parameters())
+    logger.info(f"Number of parameters: {num_params}")
+
     # Get a sample of the validation set for evaluating segmentation. We do this before preprocessing because
     # preprocessing removes word boundaries, which we need as labels for evaluation.
     segment_eval_sentences = dataset["valid"]["text"] if cfg.experiment.evaluate_segmentation else None
@@ -109,7 +113,7 @@ def main(cfg: TransformerSegmentationConfig):
     processed_dataset = dataset.map(
         data_preprocessor,
         batched=True,
-        num_proc=64,
+        num_proc=(64 if torch.cuda.is_available() else 1),
         remove_columns=["text", "target_child_age"],
     )
 
@@ -152,9 +156,6 @@ def main(cfg: TransformerSegmentationConfig):
             resume="allow",
             id=cfg.experiment.resume_run_id,
         )
-        # Report number of parameters
-        num_params = sum(p.numel() for p in model.parameters())
-        logger.info(f"Number of parameters: {num_params}")
         wandb.config.update({"num_params": num_params})
 
         # Report length of data
