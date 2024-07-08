@@ -1,4 +1,4 @@
-name: 'gpt2_1M'
+name: 'gpt2_lm_head_model'
 
 # kwargs for model initialization 
 n_layer: 6 
