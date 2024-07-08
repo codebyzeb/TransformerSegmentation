@@ -1,7 +1,7 @@
 defaults: 
   - base_config
   - _self_
-  - model: gpt2_lm
+  - model: gpt2_800k
 
 dataset: 
   name: 'transformersegmentation/CHILDES'

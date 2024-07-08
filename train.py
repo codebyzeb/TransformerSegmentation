@@ -121,7 +121,9 @@ def main(cfg: TransformerSegmentationConfig):
     eval_dataset = processed_dataset["valid"]
     if cfg.dataset.num_examples is not None:
         logger.info(f"Subsampling training dataset to {cfg.dataset.num_examples} examples, evenly spaced across the dataset.")
-        train_dataset = train_dataset.select(range(0, train_dataset.num_rows, train_dataset.num_rows // cfg.dataset.num_examples))
+        #train_dataset = train_dataset.select(range(0, train_dataset.num_rows, train_dataset.num_rows // cfg.dataset.num_examples))
+        # Shuffle then take the first num_examples. Note that this loses the ordering, but this is not currently used.
+        train_dataset = train_dataset.shuffle(seed=cfg.experiment.seed).select(range(cfg.dataset.num_examples))
     if cfg.experiment.dry_run:
         logger.info(f"Running in dry run mode -- subsampling dataset by {DRY_RUN_SUBSAMPLE_FACTOR}x")
         train_dataset = train_dataset.select(range(0, train_dataset.num_rows, DRY_RUN_SUBSAMPLE_FACTOR))

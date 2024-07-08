@@ -1,0 +1,8 @@
+name: 'gpt2_19M'
+
+# kwargs for model initialization 
+n_layer: 6 
+n_head: 8
+n_embd : 512 
+n_positions: 256
+n_inner: 2048

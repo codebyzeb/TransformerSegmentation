@@ -1,0 +1,8 @@
+name: 'gpt2_1M'
+
+# kwargs for model initialization 
+n_layer: 6 
+n_head: 4
+n_embd : 128 
+n_positions: 256
+n_inner: 512
