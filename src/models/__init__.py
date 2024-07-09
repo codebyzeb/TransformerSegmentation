@@ -21,12 +21,14 @@ def load_model(
         tokenizer (PreTrainedTokenizer): tokenizer object
     """
 
-    remove_keys = ["name", "load_from_checkpoint", "checkpoint_path"]
+    remove_keys = ["name", "load_from_checkpoint", "checkpoint_path", "kwargs"]
     model_kwargs = {
         key: val
         for key, val in cfg.model.items()
         if key not in remove_keys and val is not None
     }
+    if "kwargs" in cfg.model:
+        model_kwargs.update(cfg.model.kwargs)
 
     model_kwargs["vocab_size"] = tokenizer.vocab_size
 
@@ -39,5 +41,5 @@ def load_model(
             model = MODEL_REGISTRY[cfg.model.name](config)
     else:
         raise ValueError(f"Model {cfg.model.name} not found in registry")
-
+    
     return model
