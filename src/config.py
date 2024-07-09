@@ -30,6 +30,9 @@ class ExperimentParams:
     # Whether to evaluate the babyslm tasks
     evaluate_babyslm: bool = False
 
+    # Which tasks to evaluate for BLIMP
+    blimp_tasks: Optional[str] = None
+
     # Optional checkpoint path to resume training from
     resume_checkpoint_path: Optional[str] = None
 

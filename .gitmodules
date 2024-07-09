@@ -1,3 +1,6 @@
 [submodule "submodules/BabySLM"]
 	path = submodules/BabySLM
 	url = https://github.com/MarvinLvn/BabySLM
+[submodule "submodules/evaluation-pipeline-2024"]
+	path = submodules/evaluation-pipeline-2024
+	url = https://github.com/codebyzeb/evaluation-pipeline-2024.git

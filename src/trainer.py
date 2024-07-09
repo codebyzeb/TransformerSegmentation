@@ -21,8 +21,9 @@ from transformers.utils import get_full_repo_name, is_datasets_available
 
 from .config import TransformerSegmentationConfig
 from .datasampler import CustomBatchSampler
-from .evaluation.segmentation.segment import GPT2FeaturesSegmenter, GPT2Segmenter
-from .evaluation.babyslm.babyslm import babyslm_evaluation
+from .evaluation.segmentation import GPT2FeaturesSegmenter, GPT2Segmenter
+from .evaluation.babyslm import babyslm_evaluation
+from .evaluation.blimp import blimp_evaluation
 
 SEGMENTER_MAP = {
     "GPT2LMHeadModel": GPT2Segmenter,
@@ -52,8 +53,11 @@ class CustomTrainer(Trainer):
 
         self.hydra_config = hydra_config
         self.max_seq_length = hydra_config.data_preprocessing.max_input_length
+
+        # Evaluation parameters
         self.do_babyslm_evaluation = hydra_config.experiment.evaluate_babyslm
         self.segment_eval_sentences = segment_eval_sentences
+        self.blimp_tasks = hydra_config.experiment.blimp_tasks
 
         self.experiment_group = hydra_config.experiment.group
         self.experiment_name = hydra_config.experiment.name
@@ -292,6 +296,9 @@ class CustomTrainer(Trainer):
         if self.do_babyslm_evaluation:
             metrics.update(self.evaluate_babyslm(metric_key_prefix))
 
+        if self.blimp_tasks:
+            metrics.update(self.evaluate_blimp(metric_key_prefix))
+
         total_batch_size = self.args.eval_batch_size * self.args.world_size
         if f"{metric_key_prefix}_jit_compilation_time" in metrics:
             start_time += metrics[f"{metric_key_prefix}_jit_compilation_time"]
@@ -421,4 +428,15 @@ class CustomTrainer(Trainer):
         metrics = {}
         metrics[f'{metric_key_prefix}_babyslm_lexical'] = babyslm_evaluation(self.model, self.tokenizer, Path(self.args.output_dir), 'lexical')
         metrics[f'{metric_key_prefix}_babyslm_syntactic'] = babyslm_evaluation(self.model, self.tokenizer, Path(self.args.output_dir), 'syntactic')
+        return metrics
+    
+    def evaluate_blimp(self, metric_key_prefix):
+        """ Evaluate on BLIMP tasks """
+        metrics = {}
+        blimp_results = blimp_evaluation(self.model, self.tokenizer, Path(self.args.output_dir), self.args.eval_batch_size, self.blimp_tasks, self.args.device)
+        if "groups" in blimp_results:
+            for key in blimp_results["groups"]:
+                metrics[f'{metric_key_prefix}_{key}'] = blimp_results["groups"][key]["acc,none"]
+        for key in blimp_results["results"]:
+            metrics[f'{metric_key_prefix}_{key}'] = blimp_results["results"][key]["acc,none"]
         return metrics

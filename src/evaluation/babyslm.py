@@ -17,10 +17,10 @@ sys.path.append("submodules")
 
 from BabySLM.scripts.metrics import compute_lexical, compute_syntactic
 
-LEXICAL_STIMULI = "data/babyslm/lexical/dev/lexical_stimuli.csv"
-SYNTACTIC_STIMULI = "data/babyslm/syntactic/dev/syntactic_stimuli.csv"
-LEXICAL_GOLD_DATA = "data/babyslm/lexical/dev/gold.csv"
-SYNTACTIC_GOLD_DATA = "data/babyslm/syntactic/dev/gold.csv"
+LEXICAL_STIMULI = "evaluation_data/babyslm/lexical/dev/lexical_stimuli.csv"
+SYNTACTIC_STIMULI = "evaluation_data/babyslm/syntactic/dev/syntactic_stimuli.csv"
+LEXICAL_GOLD_DATA = "evaluation_data/babyslm/lexical/dev/gold.csv"
+SYNTACTIC_GOLD_DATA = "evaluation_data/babyslm/syntactic/dev/gold.csv"
 
 
 def extract_probabilities(examples, model, tokenizer, batch_size=16):
