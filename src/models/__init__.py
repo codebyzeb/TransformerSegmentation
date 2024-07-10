@@ -27,8 +27,6 @@ def load_model(
         for key, val in cfg.model.items()
         if key not in remove_keys and val is not None
     }
-    if "kwargs" in cfg.model:
-        model_kwargs.update(cfg.model.kwargs)
 
     model_kwargs["vocab_size"] = tokenizer.vocab_size
 
