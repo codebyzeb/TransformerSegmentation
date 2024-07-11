@@ -76,8 +76,6 @@ class ModelParams:
     n_positions: int
     n_inner: int
 
-    kwargs: Optional[Dict] = None
-
 @dataclass
 class TrainerParams:
     batch_size: int
