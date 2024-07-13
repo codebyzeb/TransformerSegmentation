@@ -40,13 +40,59 @@ DRY_RUN_WARMUP_STEPS = 10
 def main(cfg: TransformerSegmentationConfig):
     assert (
         "HF_READ_TOKEN" in os.environ and "HF_WRITE_TOKEN" in os.environ
-    ), "HF_READ_TOKEN and HF_WRITE_TOKEN need to be set as environment variables"
+    ), "HF_READ_TOKEN and HF_WRITE_TOKEN need to be set as environment variables. Check .env file and source it if necessary."
 
+    # Check and set up wandb environment variables depending on whether the run is offline or not
+    if cfg.experiment.offline_run:
+        os.environ["WANDB_DISABLED"] = "true"
+        os.environ["WANDB_MODE"] = "disabled"
+        wandb_entity = None
+        if cfg.experiment.resume_run_id is not None:
+            raise RuntimeError("resume_run_id is set but offline_run is True. Ignoring resume_run_id.")
+    else:
+        assert (
+            "WANDB_ENTITY" in os.environ
+        ), "WANDB_ENTITY needs to be set as an environment variable if not running in offline mode. Check .env file and source it if necessary."
+        wandb_entity = os.environ.get("WANDB_ENTITY")
+        if cfg.experiment.resume_checkpoint_path and cfg.experiment.resume_run_id is None:
+            raise RuntimeError("resume_run_id must be set if resume_checkpoint_path is set")
+
+    # Disable parallelism in tokenizers to avoid issues with multiprocessing
+    os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+    # It is possible to infer the name if resume_run_id is set or if resume_checkpoint_path is set. Otherwise, a random name is generated.
+    if cfg.experiment.resume_run_id:
+        # Case when resume_run_id provided but not the experiment name
+        if "name" not in cfg.experiment:
+            api = wandb.Api()
+            run = api.run(f"{wandb_entity}/{cfg.experiment.group}/{cfg.experiment.resume_run_id}")
+            cfg.experiment.name = run.name
+            logger.info(f"experiment.name not set, loaded {cfg.experiment.name} from resume_run_id {cfg.experiment.resume_run_id} on wandb.")
+        # Case when resume_run_id provided but not the checkpoint path
+        if not cfg.experiment.resume_checkpoint_path:
+            checkpoint_paths = [dir for dir in os.listdir(f"checkpoints/{cfg.experiment.group}/{cfg.experiment.name}") if dir.startswith("checkpoint")]
+            if len(checkpoint_paths) > 0:
+                checkpoint_numbers = [int(path.split("-")[-1]) for path in checkpoint_paths]
+                checkpoint_numbers.sort()
+                cfg.experiment.resume_checkpoint_path = f"checkpoints/{cfg.experiment.group}/{cfg.experiment.name}/checkpoint-{checkpoint_numbers[-1]}"
+                logger.info(f"resume_checkpoint_path not set, loaded {cfg.experiment.resume_checkpoint_path} from latest checkpoint.")
+            else:
+                raise RuntimeError(f"resume_run_id set but no checkpoints found in the run directory checkpoints/{cfg.experiment.group}/{cfg.experiment.name}. Please specify resume_checkpoint_path.")
     if "name" not in cfg.experiment:
-        # Set to dataset subconfig with random 5 digit number
-        cfg.experiment.name = f"{cfg.dataset.subconfig}-{str(torch.randint(10000, (1,)).item()).zfill(5)}"
-        logger.warning(f"experiment.name not set, using {cfg.experiment.name}")
-
+        # Case when checkpoint_path is provided but not the experiment name
+        if cfg.experiment.resume_checkpoint_path is not None:
+            cfg.experiment.name = cfg.experiment.resume_checkpoint_path.split("/")[-2]
+            logger.warning(f"experiment.name not set, infering {cfg.experiment.name} from resume_checkpoint_path.")
+        # Case when neither resume_run_id nor resume_checkpoint_path is provided. Generate a random name.
+        else:
+            cfg.experiment.name = f"{cfg.dataset.subconfig}-{str(torch.randint(9999, (1,)).item()).zfill(4)}"
+            if not cfg.experiment.offline_run:
+                api = wandb.Api()
+                runs = api.runs(f"{wandb_entity}/{cfg.experiment.group}")
+                while any(run.name == cfg.experiment.name for run in runs):
+                    cfg.experiment.name = f"{cfg.dataset.subconfig}-{str(torch.randint(9999, (1,)).item()).zfill(4)}"
+            logger.warning(f"experiment.name not set, generated random name {cfg.experiment.name}")
+       
     missing_keys: set[str] = OmegaConf.missing_keys(cfg)
     if missing_keys:
         raise RuntimeError(f"Missing keys in config: \n {missing_keys}")
@@ -136,22 +182,15 @@ def main(cfg: TransformerSegmentationConfig):
         data_collator = DataCollatorForLanguageModeling(tokenizer, mlm=False)
 
     # Setting up wandb
-    if cfg.experiment.offline_run:
-        os.environ["WANDB_DISABLED"] = "true"
-        os.environ["WANDB_MODE"] = "disabled"
-    else:
+    if not cfg.experiment.offline_run:
         # These environment variables get picked up by Trainer
         os.environ["WANDB_PROJECT"] = cfg.experiment.group
-        os.environ["WANDB_ENTITY"] = "zeb"
         wandb.config = OmegaConf.to_container(cfg, resolve=True, throw_on_missing=True)
         if cfg.experiment.resume_checkpoint_path:
-            resume_run_id = cfg.experiment.resume_run_id
-            if resume_run_id is None:
-                raise RuntimeError("resume_run_id must be set if resume_checkpoint_path is set")
-            os.environ["WANDB_RUN_ID"] = resume_run_id
+            os.environ["WANDB_RUN_ID"] = cfg.experiment.resume_run_id
             os.environ["WANDB_RESUME"] = "allow"
         wandb.init(
-            entity="zeb",
+            entity=wandb_entity,
             project=cfg.experiment.group,
             name=cfg.experiment.name,
             config=wandb.config,
