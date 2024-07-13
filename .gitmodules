@@ -4,3 +4,6 @@
 [submodule "submodules/evaluation-pipeline-2024"]
 	path = submodules/evaluation-pipeline-2024
 	url = https://github.com/codebyzeb/evaluation-pipeline-2024.git
+[submodule "submodules/--force"]
+	path = submodules/--force
+	url = https://github.com/codebyzeb/evaluation-pipeline-2024.git
