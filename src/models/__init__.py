@@ -29,6 +29,8 @@ def load_model(
     }
 
     model_kwargs["vocab_size"] = tokenizer.vocab_size
+    model_kwargs["bos_token_id"] = tokenizer.bos_token_id
+    model_kwargs["eos_token_id"] = tokenizer.eos_token_id
 
     if cfg.model.name in MODEL_REGISTRY:
         config = CONFIG_REGISTRY[cfg.model.name](**model_kwargs)

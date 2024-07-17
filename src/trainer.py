@@ -37,7 +37,7 @@ class CustomTrainer(Trainer):
     def __init__(
         self,
         hydra_config: TransformerSegmentationConfig,
-        segment_eval_sentences: List[str] = None,
+        segment_eval_sentences: Optional[List[str]] = None,
         **kwargs,
     ) -> None:
         """
@@ -62,7 +62,7 @@ class CustomTrainer(Trainer):
         self.experiment_group = hydra_config.experiment.group
         self.experiment_name = hydra_config.experiment.name
 
-        self.stride_evaluation = None
+        self.stride_evaluation = 0
 
         super().__init__(**kwargs)
 
@@ -287,7 +287,7 @@ class CustomTrainer(Trainer):
         bits_per_character = eval_loss / math.log(2)
         metrics[f"{metric_key_prefix}_bpc"] = bits_per_character
 
-        if self.stride_evaluation is not None:
+        if self.stride_evaluation != 0:
             metrics.update(self.stride_evaluate(eval_dataloader, metric_key_prefix, stride=self.stride_evaluation))
 
         if self.segment_eval_sentences:

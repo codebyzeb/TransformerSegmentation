@@ -49,19 +49,25 @@ class DataPreprocessor(object):
         self,
         params: DataPreprocessingParams,
         tokenizer: PreTrainedTokenizer,
+        get_word_boundaries: bool = True,
     ):
         """
         Args:
-            cfg (TransformerSegmentationConfig): hydra config object
+            params (DataPreprocessingParams): data processing parameters
             tokenizer (PreTrainedTokenizer): instantiated tokenizer object
+            get_word_boundaries (bool): whether to also output word boundaries aligned with tokens
         """
 
         # data processing params
         self.max_input_length = params.max_input_length
         self.join_utts = params.join_utts
+        self.remove_word_boundaries = params.remove_word_boundaries
 
         self.tokenizer = tokenizer
-        self.word_boundary_token = tokenizer.convert_tokens_to_ids("WORD_BOUNDARY")
+        self.get_word_boundaries = get_word_boundaries
+        if self.get_word_boundaries:
+            self.word_boundary_token = tokenizer.convert_tokens_to_ids("WORD_BOUNDARY")
+            self.utterance_boundary_token = tokenizer.convert_tokens_to_ids("UTT_BOUNDARY")
 
     def __call__(self, examples):
 
@@ -69,28 +75,37 @@ class DataPreprocessor(object):
         examples["text"] = [utt + " \n" for utt in examples["text"] if utt[-1] != "\n"]
 
         if self.join_utts == 'static':
+            batch = {}
             joined = " ".join([utt for utt in examples["text"]])
             joined = self.tokenizer(joined, truncation=False, padding=False)
             input_ids = joined["input_ids"]
             attention_mask = joined["attention_mask"]
 
-            # Create an array of positions that mark the start of a word
-            word_start_positions = np.minimum(len(input_ids) - 1, np.where(np.array(input_ids) == self.word_boundary_token)[0] + 1)
-            word_starts = np.zeros(len(input_ids), dtype=bool)
-            word_starts[word_start_positions] = True
+            if self.get_word_boundaries:
+                # Create an array of positions that mark the start of a word
+                word_start_positions = np.minimum(len(input_ids) - 1, np.where(np.array(input_ids) == self.word_boundary_token)[0] + 1)
+                word_starts = np.zeros(len(input_ids), dtype=bool)
+                word_starts[word_start_positions] = True
+                # Every position after a word boundary is also a word start
+                word_starts = np.logical_or(word_starts, np.array([False] + input_ids[:-1] == self.word_boundary_token))
+                # Utterance boundaries are not word boundaries
+                word_starts = np.logical_and(word_starts, np.array(input_ids) != self.utterance_boundary_token)
+                # But the first token is always a word start
+                word_starts[0] = True
 
-            # Remove the word boundary tokens
-            mask = np.where(np.array(input_ids) != self.word_boundary_token)
-            input_ids = np.array(input_ids)[mask]
-            attention_mask = np.array(attention_mask)[mask]
-            word_starts = word_starts[mask]
+            if self.remove_word_boundaries:
+                mask = np.where(np.array(input_ids) != self.word_boundary_token)
+                input_ids = np.array(input_ids)[mask]
+                attention_mask = np.array(attention_mask)[mask]
+                if self.get_word_boundaries:
+                    word_starts = word_starts[mask]
 
             # Split the long vector into inputs of length max_input_length
-            batch = {"input_ids": [], "attention_mask": [], "word_starts": []}
-            for i in range(0, len(input_ids), self.max_input_length):
-                batch["input_ids"].append(input_ids[i : i + self.max_input_length])
-                batch["attention_mask"].append(attention_mask[i : i + self.max_input_length])
-                batch["word_starts"].append(word_starts[i : i + self.max_input_length])
+            batch["input_ids"] : [input_ids[i : i + self.max_input_length] for i in range(0, len(input_ids), self.max_input_length)]
+            batch["attention_mask"] : [attention_mask[i : i + self.max_input_length] for i in range(0, len(input_ids), self.max_input_length)]
+            if self.get_word_boundaries:
+                batch["word_starts"] = [word_starts[i : i + self.max_input_length] for i in range(0, len(input_ids), self.max_input_length)]
+
             return batch
         
         # If join_utts is None, we add a utterance boundary token to the start of each utterance
@@ -104,25 +119,34 @@ class DataPreprocessor(object):
             padding=False,
         )
 
-        word_starts_list = []
+        if self.get_word_boundaries:
+            word_starts_list = []
+            for i, input_ids in enumerate(tokenized["input_ids"]):
+                # Create an array of positions that mark the start of a word
+                line_length = len(input_ids)
+                word_start_positions = np.where(np.array(input_ids) == self.word_boundary_token)[0] + 1
+                word_start_positions = np.minimum(line_length - 1, word_start_positions)
 
-        for i, input_ids in enumerate(tokenized["input_ids"]):
-            # Create an array of positions that mark the start of a word
-            line_length = len(input_ids)
-            word_start_positions = np.where(np.array(input_ids) == self.word_boundary_token)[0] + 1
-            word_start_positions = np.minimum(line_length - 1, word_start_positions)
-            word_starts = np.zeros(len(input_ids), dtype=np.int8)
-            word_starts[word_start_positions] = 1
+                word_starts = np.zeros(len(input_ids), dtype=np.int8)
+                word_starts[word_start_positions] = 1 
+                word_starts = np.logical_and(word_starts, np.array(input_ids) != self.utterance_boundary_token) # Utterance boundaries are not word boundaries
+                word_starts[0] = 1 # First token is always a word start
+                word_starts_list.append(word_starts)
 
-            # Remove the word boundary tokens and truncate
-            mask = np.where(np.array(input_ids) != self.word_boundary_token)
-            tokenized["input_ids"][i] = np.array(input_ids)[mask]
-            tokenized["attention_mask"][i] = np.array(tokenized["attention_mask"][i])[mask]
-            word_starts_list.append(word_starts[mask])
+        if self.remove_word_boundaries:
+            for i, input_ids in enumerate(tokenized["input_ids"]):
+                mask = np.where(np.array(input_ids) != self.word_boundary_token)
+                tokenized["input_ids"][i] = np.array(input_ids)[mask]
+                tokenized["attention_mask"][i] = np.array(tokenized["attention_mask"][i])[mask]
+                if self.get_word_boundaries:
+                    word_starts_list[i] = word_starts_list[i][mask]
 
         batch = {
             "input_ids": tokenized["input_ids"],
             "attention_mask": tokenized["attention_mask"],
-            "word_starts": word_starts_list,
         }
+
+        if self.get_word_boundaries:
+            batch["word_starts"] = word_starts_list
+
         return batch

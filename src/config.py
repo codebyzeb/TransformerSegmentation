@@ -10,7 +10,6 @@ from omegaconf import MISSING
 class ExperimentParams:
     seed: int
 
-
     # Name of the experiment - needs to be set at runtime
     name: str = MISSING
 
@@ -45,25 +44,34 @@ class ExperimentParams:
 class DatasetParams:
     # name of the dataset on huggingface
     name: str
-    # subconfig i.e. full
+
+    # subconfig e.g. English, German, etc.
     subconfig: str
+
     # Max age of child
     max_age: Optional[int] = None
-    # Number of examples to use (override number of examples in dataset)
-    num_examples: Optional[int] = None
 
 @dataclass
 class TokenizerParams:
     # data processing parameters
     name: str
 
-
 @dataclass
 class DataPreprocessingParams:
     # params for preprocessing the dataset (i.e. tokenization)
     max_input_length: int
+
+    # Either "dynamic" or "static" or None. Determines how utterances are collated.
     join_utts: Optional[str] = None
 
+    # Whether to remove word boundaries from the input
+    remove_word_boundaries: bool = True
+
+    # Subsample the dataset to a certain number of examples/words/tokens
+    subsample: Optional[int] = None
+
+    # Whether to subsample the dataset using words, tokens or examples
+    subsample_type: Optional[str] = None
 
 @dataclass
 class ModelParams:
