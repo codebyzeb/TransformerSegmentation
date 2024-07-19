@@ -83,6 +83,7 @@ def check_config(cfg: config.TransformerSegmentationConfig) -> None:
         else:
             cfg.experiment.name = f"{cfg.dataset.subconfig}-{str(torch.randint(9999, (1,)).item()).zfill(4)}"
             if not cfg.experiment.offline_run:
+                wandb_entity = os.environ.get("WANDB_ENTITY")
                 api = wandb.Api()
                 runs = api.runs(f"{wandb_entity}/{cfg.experiment.group}")
                 while any(run.name == cfg.experiment.name for run in runs):
@@ -103,8 +104,9 @@ def check_config(cfg: config.TransformerSegmentationConfig) -> None:
 
 def load_dataset(cfg : config.DatasetParams) -> datasets.Dataset:
     """ Loads dataset from config """
-    load_columns = ["phonemized_utterance", "target_child_age"]
-    features = datasets.Features({"phonemized_utterance": datasets.Value("string"), "target_child_age": datasets.Value("float")})
+    text_column = cfg.text_column
+    load_columns = [text_column, "target_child_age"]
+    features = datasets.Features({text_column: datasets.Value("string"), "target_child_age": datasets.Value("float")})
     dataset = datasets.load_dataset(
         cfg.name,
         cfg.subconfig,
@@ -117,8 +119,8 @@ def load_dataset(cfg : config.DatasetParams) -> datasets.Dataset:
     if cfg.max_age is not None:
         dataset = dataset.filter(lambda x: x["target_child_age"] is not None and x["target_child_age"] <= cfg.max_age, num_proc=(64 if torch.cuda.is_available() else 1))
 
-    # Rename "phonemized_utterance" to "text"
-    dataset = dataset.rename_column("phonemized_utterance", "text")
+    # Rename target column to "text"
+    dataset = dataset.rename_column(text_column, "text")
     return dataset
 
 def setup_wandb(cfg : config.ExperimentParams) -> None:

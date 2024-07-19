@@ -64,19 +64,31 @@ class DataPreprocessor(object):
         self.remove_word_boundaries = params.remove_word_boundaries
 
         self.tokenizer = tokenizer
+        self.utterance_boundary_token = tokenizer.eos_token
         self.get_word_boundaries = get_word_boundaries
-        if self.get_word_boundaries:
+        if self.get_word_boundaries or self.remove_word_boundaries:
             self.word_boundary_token = tokenizer.convert_tokens_to_ids("WORD_BOUNDARY")
-            self.utterance_boundary_token = tokenizer.convert_tokens_to_ids("UTT_BOUNDARY")
+            if self.word_boundary_token == tokenizer.unk_token_id:
+                raise ValueError("Tokenizer does not contain the WORD_BOUNDARY token. Cannot extract or remove word boundaries.")
 
     def __call__(self, examples):
-
-        # Make sure there's an utterance boundary at the end of each utterance
-        examples["text"] = [utt + " \n" for utt in examples["text"] if utt[-1] != "\n"]
+        # The tokenizer should have been configured to add an utterance boundary to the start of each utterance.
+        #
+        # There are three options for joining utterances. If join_utts is None, each example contains a single utterance 
+        # with utterance boundaries at the start and end and padding to the max_input_length:
+        # e.g. [UTT_BOUNDARY, token1, token2, ..., tokenN, UTT_BOUNDARY, PAD, ..., PAD]
+        #
+        # If join_utts is 'static', all utterances are concatenated and split into chunks of max_input_length:
+        # e.g. [UTT_BOUNDARY, token1, token2, ..., tokenN, UTT_BOUNDARY, token1, token2, ..., tokenN, UTT_BOUNDARY, ...]
+        # In this case, only the final few tokens of each chunk will be padded. 
+        #
+        # If join_utts is 'dynamic', utterances are concatenated randomly by the DataCollator so that the model always sees 
+        # new combinations of utterances and doesn't overfit to the ordering presented in the dataset. We therefore do 
+        # not need to do anything to the utterances here besides tokenize them.
 
         if self.join_utts == 'static':
             batch = {}
-            joined = " ".join([utt for utt in examples["text"]])
+            joined = f" {self.utterance_boundary_token} ".join([utt.strip() for utt in examples["text"]])
             joined = self.tokenizer(joined, truncation=False, padding=False)
             input_ids = joined["input_ids"]
             attention_mask = joined["attention_mask"]
@@ -108,10 +120,12 @@ class DataPreprocessor(object):
 
             return batch
         
-        # If join_utts is None, we add a utterance boundary token to the start of each utterance
+        # If join_utts is None, we add a utterance boundary token to the end of each utterance
+        # If join_utts is 'dynamic', we do not need to do anything to the utterances here
         elif self.join_utts is None:
-            examples["text"] = [("\n " + examples["text"][i]) for i in range(len(examples["text"]))]
+            examples["text"] = [(examples["text"][i] + ' ' + self.utterance_boundary_token) for i in range(len(examples["text"]))]
 
+        # If join_utts is 'none' or 'dynamic' we tokenize the utterances individually and return them
         tokenized = self.tokenizer(
             examples["text"],
             truncation=True,

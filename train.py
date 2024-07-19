@@ -76,7 +76,7 @@ def main(cfg: TransformerSegmentationConfig):
 
     # Preprocess data
     logger.info("Preprocessing data")
-    data_preprocessor = DataPreprocessor(cfg.data_preprocessing, tokenizer)
+    data_preprocessor = DataPreprocessor(cfg.data_preprocessing, tokenizer, get_word_boundaries=cfg.experiment.evaluate_segmentation)
     processed_dataset = dataset.map(
         data_preprocessor,
         batched=True,
@@ -112,6 +112,7 @@ def main(cfg: TransformerSegmentationConfig):
         do_predict=False,
         evaluation_strategy="steps",
         per_device_train_batch_size=cfg.trainer.batch_size,  # NOTE: We can should maybe use auto_find_batch_size
+        per_device_eval_batch_size=cfg.trainer.batch_size,
         learning_rate=cfg.trainer.lr,
         max_steps=cfg.trainer.max_training_steps,
         warmup_steps=cfg.trainer.num_warmup_steps,
@@ -143,6 +144,7 @@ def main(cfg: TransformerSegmentationConfig):
         eval_dataset=eval_dataset,
         tokenizer=tokenizer,
         data_collator=data_collator,
+        is_phonemes=cfg.dataset.is_phonemes,
     )
 
     # Initial model evaluation

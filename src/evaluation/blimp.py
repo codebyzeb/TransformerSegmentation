@@ -12,13 +12,16 @@ import lm_eval
 from lm_eval.models.huggingface import HFLM
 from lm_eval.utils import make_table
 
-def blimp_evaluation(model, tokenizer, model_path, batch_size, tasks, device):
+def blimp_evaluation(model, tokenizer, model_path, batch_size, tasks, device, is_phonemized=False):
     """ Run BLIMP evaluation using BabyLM evaluation pipline """
 
     model_wrapper = HFLM(pretrained=model, tokenizer=tokenizer, batch_size=batch_size, device=device)
 
     task_list = tasks.split(",")
-    task_manager = lm_eval.tasks.TaskManager()
+    if is_phonemized:
+        task_manager = lm_eval.tasks.TaskManager(override_data_path="evaluation_data/blimp_filtered_phonemized")
+    else:
+        task_manager = lm_eval.tasks.TaskManager()
     task_names = task_manager.match_tasks(task_list)
 
     logging.info(f"Running BLIMP evaluation for {task_names}")
@@ -27,7 +30,7 @@ def blimp_evaluation(model, tokenizer, model_path, batch_size, tasks, device):
         tasks=task_names,
         num_fewshot=0,
         task_manager=task_manager,
-        batch_size=batch_size,
+        batch_size='auto',
         device=device,
     )
 

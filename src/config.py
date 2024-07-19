@@ -48,12 +48,18 @@ class DatasetParams:
     # subconfig e.g. English, German, etc.
     subconfig: str
 
+    # Which column from the loaded dataset to use for training
+    text_column: str
+
+    # Whether the data consists of phonemes
+    is_phonemes: bool = False
+
     # Max age of child
     max_age: Optional[int] = None
 
 @dataclass
 class TokenizerParams:
-    # data processing parameters
+    # tokenizer parameters
     name: str
 
 @dataclass

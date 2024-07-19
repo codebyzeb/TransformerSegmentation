@@ -18,12 +18,12 @@ sys.path.append("submodules")
 from BabySLM.scripts.metrics import compute_lexical, compute_syntactic
 
 LEXICAL_STIMULI = "evaluation_data/babyslm/lexical/dev/lexical_stimuli.csv"
-SYNTACTIC_STIMULI = "evaluation_data/babyslm/syntactic/dev/syntactic_stimuli.csv"
+SYNTACTIC_STIMULI_ORTHO = "evaluation_data/babyslm/syntactic/dev/syntactic_stimuli_ortho.csv"
+SYNTACTIC_STIMULI_PHONEMIZED = "evaluation_data/babyslm/syntactic/dev/syntactic_stimuli_phono.csv"
 LEXICAL_GOLD_DATA = "evaluation_data/babyslm/lexical/dev/gold.csv"
 SYNTACTIC_GOLD_DATA = "evaluation_data/babyslm/syntactic/dev/gold.csv"
 
-
-def extract_probabilities(examples, model, tokenizer, batch_size=16):
+def extract_probabilities(examples, model, tokenizer, batch_size=32):
     tokenized = tokenizer(examples, return_tensors="pt", padding=True, truncation=True)
     probabilities = []
     for i in tqdm.tqdm(range(0, len(examples), batch_size)):
@@ -50,7 +50,7 @@ def write_probabilities(seq_names, probabilities, out_file):
             f.write(f"{filename} {prob}\n")
 
 
-def babyslm_evaluation(model, tokenizer, model_path, type):
+def babyslm_evaluation(model, tokenizer, model_path, type, batch_size, is_phonemized=False):
     """
     Returns either the lexical or syntactic score for the model.
 
@@ -59,12 +59,17 @@ def babyslm_evaluation(model, tokenizer, model_path, type):
         tokenizer: The tokenizer for the model
         model_path: The path to the model checkpoint
         type: The type of evaluation to be done. Either 'lexical' or 'syntactic'
+        batch_size: The batch size to be used for evaluation
+        is_phonemized: Whether to use the phonemized stimuli or not
     """
 
     if type == "lexical":
         stimuli = pd.read_csv(LEXICAL_STIMULI)
     elif type == "syntactic":
-        stimuli = pd.read_csv(SYNTACTIC_STIMULI)
+        if is_phonemized:
+            stimuli = pd.read_csv(SYNTACTIC_STIMULI_PHONEMIZED)
+        else:
+            stimuli = pd.read_csv(SYNTACTIC_STIMULI_ORTHO)
     else:
         raise ValueError("type must be either lexical or syntactic")
 
@@ -74,12 +79,9 @@ def babyslm_evaluation(model, tokenizer, model_path, type):
     stimuli["transcription"] = stimuli["transcription"].str.replace("tʃ", "t̠ʃ")
     stimuli["transcription"] = stimuli["transcription"].str.replace("dʒ", "d̠ʒ")
 
-    # Add new lines to the beginning and end of the transcription
-    stimuli["transcription"] = "\n " + stimuli["transcription"] + "\n"
-
     # Get probabilities for each example and write to a file
     examples = stimuli["transcription"].tolist()
-    probabilities = extract_probabilities(examples, model, tokenizer)
+    probabilities = extract_probabilities(examples, model, tokenizer, batch_size)
     seq_names = stimuli["filename"].tolist()
     out_file = model_path / "babyslm" / f"{type}.txt"
     write_probabilities(seq_names, probabilities, out_file)

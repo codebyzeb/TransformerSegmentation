@@ -38,6 +38,7 @@ class CustomTrainer(Trainer):
         self,
         hydra_config: TransformerSegmentationConfig,
         segment_eval_sentences: Optional[List[str]] = None,
+        is_phonemes: bool = False,
         **kwargs,
     ) -> None:
         """
@@ -53,6 +54,7 @@ class CustomTrainer(Trainer):
 
         self.hydra_config = hydra_config
         self.max_seq_length = hydra_config.data_preprocessing.max_input_length
+        self.is_phonemes = is_phonemes
 
         # Evaluation parameters
         self.do_babyslm_evaluation = hydra_config.experiment.evaluate_babyslm
@@ -426,14 +428,17 @@ class CustomTrainer(Trainer):
     def evaluate_babyslm(self, metric_key_prefix):
         """ Evaluate on BabySLM tasks """
         metrics = {}
-        metrics[f'{metric_key_prefix}_babyslm_lexical'] = babyslm_evaluation(self.model, self.tokenizer, Path(self.args.output_dir), 'lexical')
-        metrics[f'{metric_key_prefix}_babyslm_syntactic'] = babyslm_evaluation(self.model, self.tokenizer, Path(self.args.output_dir), 'syntactic')
+        if self.is_phonemes:
+            metrics[f'{metric_key_prefix}_babyslm_lexical'] = babyslm_evaluation(self.model, self.tokenizer, Path(self.args.output_dir), 'lexical', self.args.eval_batch_size, self.is_phonemes)
+        else:
+            logging.info("Not evaluating BabySLM lexical tasks as they are only supported for phoneme datasets")
+        metrics[f'{metric_key_prefix}_babyslm_syntactic'] = babyslm_evaluation(self.model, self.tokenizer, Path(self.args.output_dir), 'syntactic', self.args.eval_batch_size, self.is_phonemes)
         return metrics
     
     def evaluate_blimp(self, metric_key_prefix):
         """ Evaluate on BLIMP tasks """
         metrics = {}
-        blimp_results = blimp_evaluation(self.model, self.tokenizer, Path(self.args.output_dir), self.args.eval_batch_size, self.blimp_tasks, self.args.device)
+        blimp_results = blimp_evaluation(self.model, self.tokenizer, Path(self.args.output_dir), self.args.eval_batch_size, self.blimp_tasks, self.args.device, self.is_phonemes)
         if "groups" in blimp_results:
             for key in blimp_results["groups"]:
                 metrics[f'{metric_key_prefix}_{key}'] = blimp_results["groups"][key]["acc,none"]

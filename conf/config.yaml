@@ -6,6 +6,8 @@ defaults:
 dataset: 
   name: 'transformersegmentation/CHILDES'
   subconfig: 'English'
+  text_column: 'phonemized_utterance'
+  is_phonemes: True
   max_age: 120
 
 experiment: 
@@ -16,6 +18,7 @@ experiment:
 data_preprocessing:
   max_input_length: 64
   join_utts: "dynamic"
+  remove_word_boundaries: True
 
 tokenizer:
   name: 'transformersegmentation/CHILDES-Tokenizer' 
