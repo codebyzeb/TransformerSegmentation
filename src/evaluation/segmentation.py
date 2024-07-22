@@ -102,7 +102,7 @@ class Segmenter(object):
         self.batch_size = batch_size
         self.stride = stride
 
-        self.boundary_token = tokenizer.convert_tokens_to_ids(tokenizer.tokenize("UTT_BOUNDARY"))[0]
+        self.boundary_token = tokenizer.eos_token_id
 
         utterances = [" ".join([p for p in utt.strip().split(" ") if p != ""]) for utt in utterances] # Remove empty phones
 
@@ -127,7 +127,7 @@ class Segmenter(object):
         -------
         data : pandas.DataFrame
             A dataframe containing each phoneme (Phoneme) and phoneme position (Pos), whether or not a phoneme is the start of a word (Starts),
-            and a variety of measures of prediction uncertainty at each point in the sequence (Entropy, Increase in Entropy, Loss, Increase in Loss, Rank, Increase in Rank).
+            and a variety of measures of prediction uncertainty at each point in the sequence, depending on the model.
         """
 
         phonemes = []
@@ -147,7 +147,7 @@ class Segmenter(object):
             phonemes.append("UTT_BOUNDARY")
             word_starts.append(False)
 
-        data = self.get_uncertainties(["UTT_BOUNDARY"] + phonemes)
+        data = self.get_uncertainties(phonemes)
         data["Pos"] = list(range(len(word_starts)))
         data["Starts"] = word_starts
         data["Phoneme"] = phonemes
@@ -268,9 +268,8 @@ class Segmenter(object):
 
 class GPT2Segmenter(Segmenter):
     def get_uncertainties(self, phonemes):
-        """Gets a variety of measures of prediction uncertainty at each point in the sequence,
-            extracted from a GPT2 model. Returns one less prediction than the number of phones,
-            as the first prediction is for the utterance boundary token.
+        """ Gets a variety of measures of prediction uncertainty at each point in the sequence,
+            extracted from a GPT2 model.
 
         Parameters
         ----------
@@ -283,10 +282,11 @@ class GPT2Segmenter(Segmenter):
             A dictionary containing a variety of measures of prediction uncertainty at each point in the sequence.
         """
 
-        # Prepare token ids tensor
-        token_ids = self.tokenizer.convert_tokens_to_ids(phonemes)
+        # Prepare token ids tensor and get logits. We add a boundary token at the beginning 
+        # to get the prediction for the first phoneme and we discard the last prediction.
+        token_ids = [self.boundary_token] + self.tokenizer.convert_tokens_to_ids(phonemes)
         long_input_ids = torch.tensor(token_ids, dtype=torch.long).to(DEFAULT_DEVICE)
-        logits = self.get_logits(long_input_ids)[:len(token_ids) - 1] # Remove the last prediction. May be longer due to padding.
+        logits = self.get_logits(long_input_ids)[:len(token_ids) - 1]
 
         logging.info(f'Computing uncertainty measures...')
         loss_fct = CrossEntropyLoss(reduction="none")
@@ -443,11 +443,10 @@ class GPT2FeaturesSegmenter(GPT2Segmenter):
         self.model.return_token_logits = False
 
         # Prepare token ids tensor
-        token_ids = self.tokenizer.convert_tokens_to_ids(phonemes)
+        token_ids = [self.boundary_token] + self.tokenizer.convert_tokens_to_ids(phonemes)
         long_input_ids = torch.tensor(token_ids, dtype=torch.long).to(DEFAULT_DEVICE)
         logits = self.get_logits(long_input_ids)[:len(token_ids) - 1] # Remove the last prediction. May be longer due to padding.
         logits = logits.permute(1, 2, 0)
-
 
         # For this model, we get a loss per feature, per position
         loss_fct = CrossEntropyLoss(reduction="none")

@@ -393,7 +393,7 @@ class CustomTrainer(Trainer):
         metrics = {}
         model_class = self.model.__class__.__name__
         if model_class in SEGMENTER_MAP:
-            segmenter = SEGMENTER_MAP[model_class](self.model, self.tokenizer, self.segment_eval_sentences)
+            segmenter = SEGMENTER_MAP[model_class](self.model, self.tokenizer, self.segment_eval_sentences, batch_size=self.args.eval_batch_size)
             best_cutoffs_type = {}
             best_cutoffs_boundary = {}
             for measure in tqdm(segmenter.measures, desc="Evaluating segmentation measures"):
