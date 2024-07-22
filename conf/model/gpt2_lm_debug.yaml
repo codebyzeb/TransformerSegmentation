@@ -1,8 +1,0 @@
-name: 'gpt2_lm_head_model'
-
-# kwargs for model initialization 
-n_layer: 2 # Number of layers. Default for GPT-2 is 12
-n_head: 4 # Number of attention heads. Default for GPT-2 is 12
-n_embd : 64 # Size of embeddings. Default for GPT-2 is 768
-n_positions: 128 # Maximum sequence length. Default for GPT-2 is 1024
-n_inner: 128 # Default for GPT-2 is 3072 (set to 4x n_embd)

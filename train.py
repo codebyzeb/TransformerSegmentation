@@ -139,7 +139,7 @@ def main(cfg: TransformerSegmentationConfig):
         data_collator = DataCollatorForLanguageModeling(tokenizer, mlm=False)
 
     logger.info("Initializing model")
-    model = load_model(cfg, tokenizer)
+    model = load_model(cfg.model, tokenizer)
 
     # Get a sample of the validation set for evaluating segmentation. We do this before preprocessing because
     # preprocessing removes word boundaries, which we need as labels for evaluation.
@@ -181,7 +181,7 @@ def main(cfg: TransformerSegmentationConfig):
         do_train=True,
         do_eval=True,
         do_predict=False,
-        evaluation_strategy="steps",
+        eval_strategy="steps",
         per_device_train_batch_size=cfg.trainer.batch_size,  # NOTE: We can should maybe use auto_find_batch_size
         per_device_eval_batch_size=cfg.trainer.batch_size,
         learning_rate=cfg.trainer.lr,
@@ -203,6 +203,7 @@ def main(cfg: TransformerSegmentationConfig):
         load_best_model_at_end=True,
         metric_for_best_model="eval_perplexity",
         greater_is_better=False,  # smaller perplexity is better
+        no_cuda=not torch.cuda.is_available(),
     )
 
     # Set up trainer

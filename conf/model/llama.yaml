@@ -1,0 +1,5 @@
+name: 'llama_lm'
+
+model_kwargs: {
+  "name_or_path" : "babylm/babyllama-100m-2024",
+}

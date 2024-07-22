@@ -20,21 +20,14 @@ FEATURE_VEC_SIZE = len(FEATURES) + 1
 ### Wrapping the GPT2 models to make them compatible with the model registry ###
 
 
-@register_model("gpt2_lm_head_model", GPT2Config)
+@register_model("gpt2_lm", GPT2Config)
 class GPT2LMHeadModel(GPT2LMHeadModel):
     pass
 
 
 ### Custom GPT2 Models ###
 
-
-@register_model("tuned_gpt2_lm_head_model", GPT2Config)
-class TunedGPT2LMHeadModel(GPT2LMHeadModel):
-    pass
-    # TODO: Insert any code to overwrite the standard behavior
-
-
-@register_model("probe_gpt2_lm_head_model", GPT2Config)
+@register_model("probe_gpt2_lm", GPT2Config)
 class GPT2Probe(GPT2ForTokenClassification):
     def __init__(self, config):
         config.num_labels = 2
@@ -55,7 +48,7 @@ class GPT2Probe(GPT2ForTokenClassification):
         output_hidden_states=None,
         return_dict=None,
     ):
-        r"""
+        """
         We override the forward pass, freezing the transformer layer but otherwise using the same code as the original
         """
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
@@ -144,7 +137,7 @@ class FeatureMap(Module):
         return output
 
 
-@register_model("gpt2_feature_model", GPT2Config)
+@register_model("gpt2_feature_lm", GPT2Config)
 class GPT2FeatureModel(GPT2PreTrainedModel):
     """
     Implementation of GPT2LMHeadModel with feature vectors as I/O instead of vocab indices

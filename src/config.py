@@ -1,13 +1,13 @@
 """Defines the set of hyperparameters to be specified in the config file."""
 
-from dataclasses import dataclass
-from typing import Dict, List, Optional
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
 
 from omegaconf import MISSING
 
 
 @dataclass
-class ExperimentParams:
+class ExperimentParams():
     seed: int
 
     # Name of the experiment - needs to be set at runtime
@@ -41,7 +41,7 @@ class ExperimentParams:
 
 
 @dataclass
-class DatasetParams:
+class DatasetParams():
     # name of the dataset on huggingface
     name: str
 
@@ -58,12 +58,12 @@ class DatasetParams:
     max_age: Optional[int] = None
 
 @dataclass
-class TokenizerParams:
+class TokenizerParams():
     # tokenizer parameters
     name: str
 
 @dataclass
-class DataPreprocessingParams:
+class DataPreprocessingParams():
     # params for preprocessing the dataset (i.e. tokenization)
     max_input_length: int
 
@@ -80,18 +80,15 @@ class DataPreprocessingParams:
     subsample_type: Optional[str] = None
 
 @dataclass
-class ModelParams:
+class ModelParams():
     # model parameters
     name: str
 
-    n_layer: int
-    n_head: int
-    n_embd: int
-    n_positions: int
-    n_inner: int
+    # Model kwargs to pass to the model class. Set name_or_path here to load from a pretrained model
+    model_kwargs: Dict[str, Any] = field(default_factory=dict)
 
 @dataclass
-class TrainerParams:
+class TrainerParams():
     batch_size: int
     lr: float
     num_warmup_steps: int
@@ -102,7 +99,7 @@ class TrainerParams:
 
 
 @dataclass
-class TransformerSegmentationConfig:
+class TransformerSegmentationConfig():
     experiment: ExperimentParams
     dataset: DatasetParams
     tokenizer: TokenizerParams

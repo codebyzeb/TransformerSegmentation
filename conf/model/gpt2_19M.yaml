@@ -1,8 +1,9 @@
-name: 'gpt2_lm_head_model'
+name: 'gpt2_lm'
 
-# kwargs for model initialization 
-n_layer: 6 
-n_head: 8
-n_embd : 512 
-n_positions: 256
-n_inner: 2048
+model_kwargs: {
+  "n_layer": 6, 
+  "n_head": 8,
+  "n_embd": 512, 
+  "n_positions": 256,
+  "n_inner": 2048,
+}
