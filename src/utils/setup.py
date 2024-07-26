@@ -46,15 +46,10 @@ def load_dataset(cfg : config.DatasetParams) -> Union[datasets.Dataset, datasets
         datasets.Dataset: loaded dataset
     """
     
-    text_column = cfg.text_column
-    load_columns = [text_column, "target_child_age"]
-    features = datasets.Features({text_column: datasets.Value("string"), "target_child_age": datasets.Value("float")})
     dataset = datasets.load_dataset(
         cfg.name,
         cfg.subconfig,
         token=os.environ["HF_READ_TOKEN"],
-        column_names=load_columns,
-        features=features,
     )
 
     # Drop rows where target_child_age is none or is larger than the max_age
@@ -62,9 +57,13 @@ def load_dataset(cfg : config.DatasetParams) -> Union[datasets.Dataset, datasets
         if "target_child_age" not in dataset['train'].column_names:
             raise ValueError(f"max_age set to {cfg.max_age} but dataset does not contain target_child_age column")
         dataset = dataset.filter(lambda x: x["target_child_age"] is not None and x["target_child_age"] <= cfg.max_age, num_proc=(64 if torch.cuda.is_available() else 1))
+    
+    dataset.remove_columns(set(dataset['train'].column_names) - set([cfg.text_column]))
 
     # Rename target column to "text"
-    dataset = dataset.rename_column(text_column, "text")
+    if cfg.text_column != "text":
+        dataset = dataset.rename_column(cfg.text_column, "text")
+    
     return dataset
 
 def setup_wandb(cfg : config.ExperimentParams) -> None:

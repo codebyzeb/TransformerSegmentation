@@ -167,7 +167,7 @@ def main(cfg: TransformerSegmentationConfig):
         data_preprocessor,
         batched=True,
         num_proc=(64 if torch.cuda.is_available() else 1),
-        remove_columns=["text", "target_child_age"],
+        remove_columns=["text"],
     )
     train_dataset = processed_dataset["train"]
     eval_dataset = processed_dataset["valid"]
