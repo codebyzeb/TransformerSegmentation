@@ -1,0 +1,12 @@
+# @package _global_
+experiment:
+  name: ???
+  group: ???
+  seed: 42 
+  offline_run: False
+  dry_run: False
+  evaluate_segmentation: True
+  evaluate_babyslm: False
+  blimp_tasks: 'blimp_filtered'
+  resume_checkpoint_path: null
+  resume_run_id: null

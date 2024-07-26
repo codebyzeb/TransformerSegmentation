@@ -1,0 +1,5 @@
+name: 'transformersegmentation/CHILDES'
+subconfig: 'English'
+text_column: 'processed_gloss'
+is_phonemes: False
+max_age: 120

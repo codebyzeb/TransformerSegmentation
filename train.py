@@ -95,17 +95,28 @@ def check_config(cfg: TransformerSegmentationConfig) -> None:
                     cfg.experiment.name = f"{cfg.dataset.subconfig}-{str(torch.randint(9999, (1,)).item()).zfill(4)}"
             logger.warning(f"experiment.name not set, generated random name {cfg.experiment.name}")
 
+    # Raise error if any keys are missing
     missing_keys: set[str] = OmegaConf.missing_keys(cfg)
     if missing_keys:
         raise RuntimeError(f"Missing keys in config: \n {missing_keys}")
     if cfg.data_preprocessing.join_utts not in ["dynamic", "static", None, "None"]:
         raise RuntimeError(f"Invalid value for join_utts: {cfg.data_preprocessing.join_utts}. Must be one of 'dynamic', 'static', or None.")
-    if cfg.data_preprocessing.join_utts == "None":
-        cfg.data_preprocessing.join_utts = None
     if cfg.data_preprocessing.subsample_type not in ["examples", "words", "tokens", None]:
         raise RuntimeError(f"Invalid value for subsample_type: {cfg.data_preprocessing.subsample_type}. Must be one of 'examples', 'words', or 'tokens'.")
     if cfg.experiment.evaluate_babyslm and "English" not in cfg.dataset.subconfig:
         raise RuntimeError("evaluate_babyslm is only supported for the English dataset.")
+    
+    # Fix values
+    if cfg.data_preprocessing.join_utts == "None":
+        cfg.data_preprocessing.join_utts = None
+
+    # Trainer step defaults
+    if cfg.trainer.logging_steps is None:
+        cfg.trainer.logging_steps = cfg.trainer.max_training_steps // 100 # log every 1% of training
+    if cfg.trainer.eval_steps is None:
+        cfg.trainer.eval_steps = cfg.trainer.max_training_steps // 10 # evaluate every 10% of training
+    if cfg.trainer.save_steps is None:
+        cfg.trainer.save_steps = cfg.trainer.max_training_steps // 10
 
 @hydra.main(version_base=None, config_path="conf", config_name="config")
 def main(cfg: TransformerSegmentationConfig):
@@ -117,8 +128,14 @@ def main(cfg: TransformerSegmentationConfig):
         logger.info("Running in dry run mode -- overriding config with values: ")
         logger.info(f"\t max_training_steps: {DRY_RUN_TRAIN_STEPS}")
         logger.info(f"\t num_warmup_steps: {DRY_RUN_WARMUP_STEPS}")
+        logger.info(f"\t eval_steps: {DRY_RUN_WARMUP_STEPS // 2}")
+        logger.info(f"\t save_steps: {DRY_RUN_WARMUP_STEPS // 2}")
+        logger.info(f"\t logging_steps: {DRY_RUN_WARMUP_STEPS // 100}")
         cfg.trainer.max_training_steps = DRY_RUN_TRAIN_STEPS
         cfg.trainer.num_warmup_steps = DRY_RUN_WARMUP_STEPS
+        cfg.trainer.eval_steps = DRY_RUN_TRAIN_STEPS // 2
+        cfg.trainer.save_steps = DRY_RUN_TRAIN_STEPS // 2
+        cfg.trainer.logging_steps = DRY_RUN_TRAIN_STEPS // 100
     logger.info(f"Config: {OmegaConf.to_yaml(cfg)}")
 
     logger.info("Loading dataset")
@@ -188,9 +205,9 @@ def main(cfg: TransformerSegmentationConfig):
         max_steps=cfg.trainer.max_training_steps,
         warmup_steps=cfg.trainer.num_warmup_steps,
         seed=cfg.experiment.seed,
-        eval_steps=cfg.trainer.max_training_steps // (2 if cfg.experiment.dry_run else 10),  # evaluate every 10% of training
-        save_steps=cfg.trainer.max_training_steps // (2 if cfg.experiment.dry_run else 10),  # checkpoint every 10% of training
-        logging_steps=cfg.trainer.max_training_steps // 100,  # log every 1% of training
+        eval_steps=cfg.trainer.eval_steps,
+        save_steps=cfg.trainer.save_steps,
+        logging_steps=cfg.trainer.logging_steps,
         run_name=cfg.experiment.name,
         report_to="wandb" if not cfg.experiment.offline_run else None,  # wandb deactivated for dry runs
         save_strategy="steps",

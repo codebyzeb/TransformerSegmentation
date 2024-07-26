@@ -1,4 +1,4 @@
-name: 'gpt2_lm_head_model'
+name: 'gpt2_lm'
 
 model_kwargs: {
   "n_layer": 3, 

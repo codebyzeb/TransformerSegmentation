@@ -1,0 +1,4 @@
+name: 'transformersegmentation/BabyLM-phonemized'
+subconfig: 'strict'
+text_column: 'phonemized_utterance'
+is_phonemes: True

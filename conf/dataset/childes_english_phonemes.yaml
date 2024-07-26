@@ -1,0 +1,5 @@
+name: 'transformersegmentation/CHILDES'
+subconfig: 'English'
+text_column: 'phonemized_utterance'
+is_phonemes: True
+max_age: 120

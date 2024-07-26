@@ -37,7 +37,7 @@ def set_seed(seed: int) -> None:
     if torch.cuda.is_available() > 0:
         torch.cuda.manual_seed_all(seed)
 
-def load_dataset(cfg : config.DatasetParams) -> datasets.Dataset:
+def load_dataset(cfg : config.DatasetParams) -> Union[datasets.Dataset, datasets.DatasetDict, datasets.IterableDataset, datasets.IterableDatasetDict]:
     """ Loads dataset from config
 
     Args:
@@ -59,6 +59,8 @@ def load_dataset(cfg : config.DatasetParams) -> datasets.Dataset:
 
     # Drop rows where target_child_age is none or is larger than the max_age
     if cfg.max_age is not None:
+        if "target_child_age" not in dataset['train'].column_names:
+            raise ValueError(f"max_age set to {cfg.max_age} but dataset does not contain target_child_age column")
         dataset = dataset.filter(lambda x: x["target_child_age"] is not None and x["target_child_age"] <= cfg.max_age, num_proc=(64 if torch.cuda.is_available() else 1))
 
     # Rename target column to "text"

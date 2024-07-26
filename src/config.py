@@ -93,7 +93,9 @@ class TrainerParams():
     lr: float
     num_warmup_steps: int
     max_training_steps: int
-
+    logging_steps: Optional[int] = None
+    save_steps: Optional[int] = None
+    eval_steps: Optional[int] = None
 
 ### Container for entire config ###
 

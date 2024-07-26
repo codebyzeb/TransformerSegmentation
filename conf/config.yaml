@@ -1,30 +1,25 @@
 defaults: 
   - base_config
   - _self_
-  - model: gpt2_800k
-
-dataset: 
-  name: 'transformersegmentation/CHILDES'
-  subconfig: 'English'
-  text_column: 'phonemized_utterance'
-  is_phonemes: True
-  max_age: 120
-
-experiment: 
-  seed: 42 
-  evaluate_segmentation: True
-  evaluate_babyslm: False
+  - model: gpt2_85M
+  - dataset: childes_english_phonemes
+  - experiment: base_experiment
 
 data_preprocessing:
   max_input_length: 64
   join_utts: "dynamic"
   remove_word_boundaries: True
+  subsample: null
+  subsample_type: "examples"
 
 tokenizer:
-  name: 'transformersegmentation/CHILDES-Tokenizer' 
+  name: 'transformersegmentation/CHILDES-English-phoneme-tokenizer' 
 
 trainer: 
   batch_size: 32 # across 8 GPUs gives an effective batch size of 1024
   lr: 1e-3 # 1e-4 is used in fairseq; 1e-3 is default in huggingface
   num_warmup_steps: 60_000
   max_training_steps: 200_000
+  logging_steps: null # Defaults to log every 1% 
+  save_steps: null # Defaults to checkpoint every 10%
+  eval_steps: null # Defaults to evaluate every 10%

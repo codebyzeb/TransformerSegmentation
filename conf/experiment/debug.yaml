@@ -1,0 +1,13 @@
+# @package _global_
+defaults:
+  - base_experiment
+  - override /model: gpt2_400k
+
+experiment:
+  name: debug
+  group: debug
+  dry_run: True
+  offline_run: True
+
+dataset:
+  max_age: null # Default is 120, but filtering take a few minutes which is annoying when debugging.

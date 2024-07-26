@@ -1,0 +1,25 @@
+# @package _global_
+defaults:
+  - base_experiment
+  - override /model: ??? # Must provide model
+  - override /dataset: babylm_strict_phonemes
+
+data_preprocessing:
+  subsample: 100_000_000
+  subsample_type: 'words'
+
+experiment:
+  group: dropout
+  evaluate_babyslm: True
+  evaluate_segmentation: False
+  blimp_tasks: 'blimp_filtered'
+
+trainer:
+  eval_steps: 50_000 # Only evaluate every 25% of training since blimp is slow
+
+model:
+  model_kwargs: {
+    "resid_pdrop" : 0.5,
+    "embd_pdrop" : 0.5,
+    "attn_pdrop" : 0.5,
+  }
