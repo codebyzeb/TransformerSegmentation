@@ -1,0 +1,20 @@
+# @package _global_
+defaults:
+  - base_experiment
+  - override /model: ??? # Must provide model
+  - override /tokenizer: babylm_text_bpe
+  - override /dataset: babylm_strict_text
+
+data_preprocessing:
+  max_input_length: 128
+  join_utts: "static"
+  remove_word_boundaries: False
+
+experiment:
+  group: babylm
+  evaluate_babyslm: True
+  evaluate_segmentation: False
+  blimp_tasks: 'blimp_filtered'
+
+trainer:
+  eval_steps: 50_000 # Only evaluate every 25% of training since blimp is slow

@@ -6,6 +6,7 @@ from transformers import PreTrainedModel
 from ..config import ModelParams
 from .gpt2 import *
 from .llama import *
+from .gptneox import *
 from .registry import CONFIG_REGISTRY, MODEL_REGISTRY
 from ..preprocessing import create_phoneme_map
 

@@ -3,7 +3,8 @@ defaults:
   - _self_
   - model: gpt2_85M
   - dataset: childes_english_phonemes
-  - experiment: base_experiment
+  - tokenizer: childes_english_phoneme
+  - experiment: base_experiment # Must be last deafult
 
 data_preprocessing:
   max_input_length: 64
@@ -11,9 +12,6 @@ data_preprocessing:
   remove_word_boundaries: True
   subsample: null
   subsample_type: "examples"
-
-tokenizer:
-  name: 'transformersegmentation/CHILDES-English-phoneme-tokenizer' 
 
 trainer: 
   batch_size: 32 # across 8 GPUs gives an effective batch size of 1024

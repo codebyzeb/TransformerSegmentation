@@ -1,0 +1,16 @@
+# @package _global_
+defaults:
+  - base_experiment
+  - override /model: ??? # Must provide model
+  - override /dataset: childes_english_text
+  - override /tokenizer: childes_english_text_bpe
+
+data_preprocessing:
+  max_input_length: 64
+  join_utts: "static"
+  remove_word_boundaries: False
+
+experiment:
+  group: childes
+  evaluate_babyslm: True
+  evaluate_segmentation: True

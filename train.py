@@ -103,8 +103,6 @@ def check_config(cfg: TransformerSegmentationConfig) -> None:
         raise RuntimeError(f"Invalid value for join_utts: {cfg.data_preprocessing.join_utts}. Must be one of 'dynamic', 'static', or None.")
     if cfg.data_preprocessing.subsample_type not in ["examples", "words", "tokens", None]:
         raise RuntimeError(f"Invalid value for subsample_type: {cfg.data_preprocessing.subsample_type}. Must be one of 'examples', 'words', or 'tokens'.")
-    if cfg.experiment.evaluate_babyslm and "English" not in cfg.dataset.subconfig:
-        raise RuntimeError("evaluate_babyslm is only supported for the English dataset.")
     
     # Fix values
     if cfg.data_preprocessing.join_utts == "None":

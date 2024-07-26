@@ -1,0 +1,10 @@
+# @package _global_
+defaults:
+  - base_experiment
+  - override /model: ??? # Must provide model
+
+experiment:
+  group: childes
+  evaluate_babyslm: True
+  evaluate_segmentation: True
+  
