@@ -58,7 +58,7 @@ def load_dataset(cfg : config.DatasetParams) -> Union[datasets.Dataset, datasets
             raise ValueError(f"max_age set to {cfg.max_age} but dataset does not contain target_child_age column")
         dataset = dataset.filter(lambda x: x["target_child_age"] is not None and x["target_child_age"] <= cfg.max_age, num_proc=(64 if torch.cuda.is_available() else 1))
     
-    dataset.remove_columns(set(dataset['train'].column_names) - set([cfg.text_column]))
+    dataset = dataset.remove_columns(set(dataset['train'].column_names) - set([cfg.text_column]))
 
     # Rename target column to "text"
     if cfg.text_column != "text":

@@ -25,7 +25,7 @@ def load_model(
 
     model_kwargs = dict(cfg.model_kwargs)
 
-    #model_kwargs["vocab_size"] = tokenizer.vocab_size
+    model_kwargs["vocab_size"] = tokenizer.vocab_size
     model_kwargs["bos_token_id"] = tokenizer.bos_token_id
     model_kwargs["eos_token_id"] = tokenizer.eos_token_id
 

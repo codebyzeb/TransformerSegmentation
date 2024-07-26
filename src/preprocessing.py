@@ -113,8 +113,8 @@ class DataPreprocessor(object):
                     word_starts = word_starts[mask]
 
             # Split the long vector into inputs of length max_input_length
-            batch["input_ids"] : [input_ids[i : i + self.max_input_length] for i in range(0, len(input_ids), self.max_input_length)]
-            batch["attention_mask"] : [attention_mask[i : i + self.max_input_length] for i in range(0, len(input_ids), self.max_input_length)]
+            batch["input_ids"] = [input_ids[i : i + self.max_input_length] for i in range(0, len(input_ids), self.max_input_length)]
+            batch["attention_mask"] = [attention_mask[i : i + self.max_input_length] for i in range(0, len(input_ids), self.max_input_length)]
             if self.get_word_boundaries:
                 batch["word_starts"] = [word_starts[i : i + self.max_input_length] for i in range(0, len(input_ids), self.max_input_length)]
 

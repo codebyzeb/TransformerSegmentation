@@ -218,7 +218,7 @@ def main(cfg: TransformerSegmentationConfig):
         load_best_model_at_end=True,
         metric_for_best_model="eval_perplexity",
         greater_is_better=False,  # smaller perplexity is better
-        no_cuda=not torch.cuda.is_available(),
+        use_cpu=not torch.cuda.is_available(),
     )
 
     # Set up trainer
