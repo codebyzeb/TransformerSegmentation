@@ -13,4 +13,4 @@ data_preprocessing:
 experiment:
   group: childes
   evaluate_babyslm: True
-  evaluate_segmentation: True
+  evaluate_segmentation: False

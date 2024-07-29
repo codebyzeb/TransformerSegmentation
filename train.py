@@ -35,8 +35,9 @@ DRY_RUN_SUBSAMPLE_FACTOR = 10 // (10 if torch.cuda.device_count() > 1 else 1)
 DRY_RUN_TRAIN_STEPS = 100
 DRY_RUN_WARMUP_STEPS = 10
 
+
 def check_and_set_environment_variables(cfg: TransformerSegmentationConfig) -> None:
-    """ Checks huggingface tokens exist and sets up wandb environment variables """
+    """Checks huggingface tokens exist and sets up wandb environment variables"""
 
     assert (
         "HF_READ_TOKEN" in os.environ and "HF_WRITE_TOKEN" in os.environ
@@ -54,11 +55,12 @@ def check_and_set_environment_variables(cfg: TransformerSegmentationConfig) -> N
         if cfg.experiment.resume_checkpoint_path and cfg.experiment.resume_run_id is None:
             raise RuntimeError("resume_run_id must be set if resume_checkpoint_path is set")
 
-     # Disable parallelism in tokenizers to avoid issues with multiprocessing
+    # Disable parallelism in tokenizers to avoid issues with multiprocessing
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
+
 def check_config(cfg: TransformerSegmentationConfig) -> None:
-    """ Infer missing config values (checkpoint path and/or experiment name) and check if keys are missing """
+    """Infer missing config values (checkpoint path and/or experiment name) and check if keys are missing"""
 
     # It is possible to infer the name if resume_run_id is set or if resume_checkpoint_path is set. Otherwise, a random name is generated.
     if cfg.experiment.resume_run_id:
@@ -68,17 +70,25 @@ def check_config(cfg: TransformerSegmentationConfig) -> None:
             api = wandb.Api()
             run = api.run(f"{wandb_entity}/{cfg.experiment.group}/{cfg.experiment.resume_run_id}")
             cfg.experiment.name = run.name
-            logger.info(f"experiment.name not set, loaded {cfg.experiment.name} from resume_run_id {cfg.experiment.resume_run_id} on wandb.")
+            logger.info(
+                f"experiment.name not set, loaded {cfg.experiment.name} from resume_run_id {cfg.experiment.resume_run_id} on wandb."
+            )
         # Case when resume_run_id provided but not the checkpoint path
         if not cfg.experiment.resume_checkpoint_path:
-            checkpoint_paths = [dir for dir in os.listdir(f"checkpoints/{cfg.experiment.group}/{cfg.experiment.name}") if dir.startswith("checkpoint")]
+            checkpoint_paths = [
+                dir for dir in os.listdir(f"checkpoints/{cfg.experiment.group}/{cfg.experiment.name}") if dir.startswith("checkpoint")
+            ]
             if len(checkpoint_paths) > 0:
                 checkpoint_numbers = [int(path.split("-")[-1]) for path in checkpoint_paths]
                 checkpoint_numbers.sort()
-                cfg.experiment.resume_checkpoint_path = f"checkpoints/{cfg.experiment.group}/{cfg.experiment.name}/checkpoint-{checkpoint_numbers[-1]}"
+                cfg.experiment.resume_checkpoint_path = (
+                    f"checkpoints/{cfg.experiment.group}/{cfg.experiment.name}/checkpoint-{checkpoint_numbers[-1]}"
+                )
                 logger.info(f"resume_checkpoint_path not set, loaded {cfg.experiment.resume_checkpoint_path} from latest checkpoint.")
             else:
-                raise RuntimeError(f"resume_run_id set but no checkpoints found in the run directory checkpoints/{cfg.experiment.group}/{cfg.experiment.name}. Please specify resume_checkpoint_path.")
+                raise RuntimeError(
+                    f"resume_run_id set but no checkpoints found in the run directory checkpoints/{cfg.experiment.group}/{cfg.experiment.name}. Please specify resume_checkpoint_path."
+                )
     if "name" not in cfg.experiment:
         # Case when checkpoint_path is provided but not the experiment name
         if cfg.experiment.resume_checkpoint_path is not None:
@@ -90,8 +100,12 @@ def check_config(cfg: TransformerSegmentationConfig) -> None:
             if not cfg.experiment.offline_run:
                 wandb_entity = os.environ.get("WANDB_ENTITY")
                 api = wandb.Api()
-                runs = api.runs(f"{wandb_entity}/{cfg.experiment.group}")
-                while any(run.name == cfg.experiment.name for run in runs):
+                try:
+                    runs = api.runs(f"{wandb_entity}/{cfg.experiment.group}")
+                    while any(run.name == cfg.experiment.name for run in runs):
+                        cfg.experiment.name = f"{cfg.dataset.subconfig}-{str(torch.randint(9999, (1,)).item()).zfill(4)}"
+                except Exception as e:
+                    logger.warning(f"Failed to check if experiment name {cfg.experiment.name} is unique on wandb. Error: {e}")
                     cfg.experiment.name = f"{cfg.dataset.subconfig}-{str(torch.randint(9999, (1,)).item()).zfill(4)}"
             logger.warning(f"experiment.name not set, generated random name {cfg.experiment.name}")
 
@@ -102,23 +116,25 @@ def check_config(cfg: TransformerSegmentationConfig) -> None:
     if cfg.data_preprocessing.join_utts not in ["dynamic", "static", None, "None"]:
         raise RuntimeError(f"Invalid value for join_utts: {cfg.data_preprocessing.join_utts}. Must be one of 'dynamic', 'static', or None.")
     if cfg.data_preprocessing.subsample_type not in ["examples", "words", "tokens", None]:
-        raise RuntimeError(f"Invalid value for subsample_type: {cfg.data_preprocessing.subsample_type}. Must be one of 'examples', 'words', or 'tokens'.")
-    
+        raise RuntimeError(
+            f"Invalid value for subsample_type: {cfg.data_preprocessing.subsample_type}. Must be one of 'examples', 'words', or 'tokens'."
+        )
+
     # Fix values
     if cfg.data_preprocessing.join_utts == "None":
         cfg.data_preprocessing.join_utts = None
 
     # Trainer step defaults
     if cfg.trainer.logging_steps is None:
-        cfg.trainer.logging_steps = cfg.trainer.max_training_steps // 100 # log every 1% of training
+        cfg.trainer.logging_steps = cfg.trainer.max_training_steps // 100  # log every 1% of training
     if cfg.trainer.eval_steps is None:
-        cfg.trainer.eval_steps = cfg.trainer.max_training_steps // 10 # evaluate every 10% of training
+        cfg.trainer.eval_steps = cfg.trainer.max_training_steps // 10  # evaluate every 10% of training
     if cfg.trainer.save_steps is None:
         cfg.trainer.save_steps = cfg.trainer.max_training_steps // 10
 
+
 @hydra.main(version_base=None, config_path="conf", config_name="config")
 def main(cfg: TransformerSegmentationConfig):
-
     check_and_set_environment_variables(cfg)
     check_config(cfg)
     setup.set_seed(cfg.experiment.seed)
@@ -141,8 +157,8 @@ def main(cfg: TransformerSegmentationConfig):
     logging.info(f"Dataset loaded with {len(dataset['train'])} training examples")
     if cfg.experiment.dry_run:
         logger.info(f"Running in dry run mode -- subsampling dataset by {DRY_RUN_SUBSAMPLE_FACTOR}x")
-        dataset['train'] = dataset['train'].select(range(0, dataset['train'].num_rows, DRY_RUN_SUBSAMPLE_FACTOR))
-        dataset['valid'] = dataset['valid'].select(range(0, dataset['valid'].num_rows, DRY_RUN_SUBSAMPLE_FACTOR))
+        dataset["train"] = dataset["train"].select(range(0, dataset["train"].num_rows, DRY_RUN_SUBSAMPLE_FACTOR))
+        dataset["valid"] = dataset["valid"].select(range(0, dataset["valid"].num_rows, DRY_RUN_SUBSAMPLE_FACTOR))
 
     logger.info("Loading tokenizer")
     tokenizer = setup.load_tokenizer(cfg.tokenizer)
@@ -174,7 +190,7 @@ def main(cfg: TransformerSegmentationConfig):
 
     # Subsample training dataset
     if cfg.data_preprocessing.subsample is not None:
-        logger.info(f"Subsampling dataset by {cfg.data_preprocessing.subsample} {cfg.data_preprocessing.subsample_type}")        
+        logger.info(f"Subsampling dataset by {cfg.data_preprocessing.subsample} {cfg.data_preprocessing.subsample_type}")
         train_dataset = setup.subsample_dataset(train_dataset, cfg.data_preprocessing.subsample, cfg.data_preprocessing.subsample_type)
 
     # Report key metrics
