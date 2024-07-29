@@ -6,43 +6,77 @@ from transformers import PreTrainedTokenizer
 
 from .config import DataPreprocessingParams
 
-FEATURES = ['tone', 'stress', 'syllabic', 'short', 'long',
-       'consonantal', 'sonorant', 'continuant', 'delayedRelease',
-       'approximant', 'tap', 'trill', 'nasal', 'lateral', 'labial', 'round',
-       'labiodental', 'coronal', 'anterior', 'distributed', 'strident',
-       'dorsal', 'high', 'low', 'front', 'back', 'tense',
-       'retractedTongueRoot', 'advancedTongueRoot', 'periodicGlottalSource',
-       'epilaryngealSource', 'spreadGlottis', 'constrictedGlottis', 'fortis',
-       'lenis', 'raisedLarynxEjective', 'loweredLarynxImplosive', 'click']
+FEATURES = [
+    "tone",
+    "stress",
+    "syllabic",
+    "short",
+    "long",
+    "consonantal",
+    "sonorant",
+    "continuant",
+    "delayedRelease",
+    "approximant",
+    "tap",
+    "trill",
+    "nasal",
+    "lateral",
+    "labial",
+    "round",
+    "labiodental",
+    "coronal",
+    "anterior",
+    "distributed",
+    "strident",
+    "dorsal",
+    "high",
+    "low",
+    "front",
+    "back",
+    "tense",
+    "retractedTongueRoot",
+    "advancedTongueRoot",
+    "periodicGlottalSource",
+    "epilaryngealSource",
+    "spreadGlottis",
+    "constrictedGlottis",
+    "fortis",
+    "lenis",
+    "raisedLarynxEjective",
+    "loweredLarynxImplosive",
+    "click",
+]
 
 PAD_FEATURE_VEC = [0] * len(FEATURES) + [0]
 BOUNDARY_FEATURE_VEC = [0] * len(FEATURES) + [1]
 UNK_FEATURE_VEC = [0] * len(FEATURES) + [2]
 
-PHOIBLE_PATH = 'data/phoible.csv'
+PHOIBLE_PATH = "data/phoible.csv"
+
 
 def create_phoneme_map(tokenizer, phoible_data_path=PHOIBLE_PATH):
-        """
-        Creates a map from tokenizer IDs to features.
-        """
-        
-        phoible = pd.read_csv(phoible_data_path)
-        phoneme_map = {}
+    """
+    Creates a map from tokenizer IDs to features.
+    """
 
-        for phoneme, id in tokenizer.vocab.items():
-            row = phoible[phoible['Phoneme'] == phoneme][FEATURES]
-            
-            # Convert features to a vector of 0s, 1s, and 2s
-            if row.shape[0] != 0:
-                features = [1 if f == '-' else 2 if f == '+' else 0 for f in row.values[0]] + [0]
-            elif phoneme in ['WORD_BOUNDARY', 'UTT_BOUNDARY']:
-                features = BOUNDARY_FEATURE_VEC
-            elif phoneme in ['PAD', 'EOS', 'BOS']:
-                features = PAD_FEATURE_VEC
-            else:
-                features = UNK_FEATURE_VEC
-            phoneme_map[id] = features
-        return phoneme_map
+    phoible = pd.read_csv(phoible_data_path)
+    phoneme_map = {}
+
+    for phoneme, id in tokenizer.vocab.items():
+        row = phoible[phoible["Phoneme"] == phoneme][FEATURES]
+
+        # Convert features to a vector of 0s, 1s, and 2s
+        if row.shape[0] != 0:
+            features = [1 if f == "-" else 2 if f == "+" else 0 for f in row.values[0]] + [0]
+        elif phoneme in ["WORD_BOUNDARY", "UTT_BOUNDARY"]:
+            features = BOUNDARY_FEATURE_VEC
+        elif phoneme in ["PAD", "EOS", "BOS"]:
+            features = PAD_FEATURE_VEC
+        else:
+            features = UNK_FEATURE_VEC
+        phoneme_map[id] = features
+    return phoneme_map
+
 
 class DataPreprocessor(object):
     def __init__(
@@ -67,26 +101,31 @@ class DataPreprocessor(object):
         self.utterance_boundary_token = tokenizer.eos_token
         self.get_word_boundaries = get_word_boundaries
         if self.get_word_boundaries or self.remove_word_boundaries:
-            self.word_boundary_token = tokenizer.convert_tokens_to_ids("WORD_BOUNDARY")
-            if self.word_boundary_token == tokenizer.unk_token_id:
-                raise ValueError("Tokenizer does not contain the WORD_BOUNDARY token. Cannot extract or remove word boundaries.")
+            if "WORD_BOUNDARY" in tokenizer.special_tokens_map:
+                self.word_boundary_token = tokenizer.convert_tokens_to_ids("WORD_BOUNDARY")
+            elif "W" in tokenizer.special_tokens_map:
+                self.word_boundary_token = tokenizer.convert_tokens_to_ids("W")
+            else:
+                raise ValueError(
+                    "Tokenizer does not contain the word boundary token (should be 'W' or 'WORD_BOUNDARY' in special tokens map). Cannot extract or remove word boundaries."
+                )
 
     def __call__(self, examples):
         # The tokenizer should have been configured to add an utterance boundary to the start of each utterance.
         #
-        # There are three options for joining utterances. If join_utts is None, each example contains a single utterance 
+        # There are three options for joining utterances. If join_utts is None, each example contains a single utterance
         # with utterance boundaries at the start and end and padding to the max_input_length:
         # e.g. [UTT_BOUNDARY, token1, token2, ..., tokenN, UTT_BOUNDARY, PAD, ..., PAD]
         #
         # If join_utts is 'static', all utterances are concatenated and split into chunks of max_input_length:
         # e.g. [UTT_BOUNDARY, token1, token2, ..., tokenN, UTT_BOUNDARY, token1, token2, ..., tokenN, UTT_BOUNDARY, ...]
-        # In this case, only the final few tokens of each chunk will be padded. 
+        # In this case, only the final few tokens of each chunk will be padded.
         #
-        # If join_utts is 'dynamic', utterances are concatenated randomly by the DataCollator so that the model always sees 
-        # new combinations of utterances and doesn't overfit to the ordering presented in the dataset. We therefore do 
+        # If join_utts is 'dynamic', utterances are concatenated randomly by the DataCollator so that the model always sees
+        # new combinations of utterances and doesn't overfit to the ordering presented in the dataset. We therefore do
         # not need to do anything to the utterances here besides tokenize them.
 
-        if self.join_utts == 'static':
+        if self.join_utts == "static":
             batch = {}
             joined = f" {self.utterance_boundary_token} ".join([utt.strip() for utt in examples["text"]])
             joined = self.tokenizer(joined, truncation=False, padding=False)
@@ -114,22 +153,24 @@ class DataPreprocessor(object):
 
             # Split the long vector into inputs of length max_input_length
             batch["input_ids"] = [input_ids[i : i + self.max_input_length] for i in range(0, len(input_ids), self.max_input_length)]
-            batch["attention_mask"] = [attention_mask[i : i + self.max_input_length] for i in range(0, len(input_ids), self.max_input_length)]
+            batch["attention_mask"] = [
+                attention_mask[i : i + self.max_input_length] for i in range(0, len(input_ids), self.max_input_length)
+            ]
             if self.get_word_boundaries:
                 batch["word_starts"] = [word_starts[i : i + self.max_input_length] for i in range(0, len(input_ids), self.max_input_length)]
 
             return batch
-        
+
         # If join_utts is None, we add a utterance boundary token to the end of each utterance
         # If join_utts is 'dynamic', we do not need to do anything to the utterances here
         elif self.join_utts is None:
-            examples["text"] = [(examples["text"][i] + ' ' + self.utterance_boundary_token) for i in range(len(examples["text"]))]
+            examples["text"] = [(examples["text"][i] + " " + self.utterance_boundary_token) for i in range(len(examples["text"]))]
 
         # If join_utts is 'none' or 'dynamic' we tokenize the utterances individually and return them
         tokenized = self.tokenizer(
             examples["text"],
             truncation=True,
-            max_length=self.max_input_length, 
+            max_length=self.max_input_length,
             padding=False,
         )
 
@@ -142,9 +183,11 @@ class DataPreprocessor(object):
                 word_start_positions = np.minimum(line_length - 1, word_start_positions)
 
                 word_starts = np.zeros(len(input_ids), dtype=np.int8)
-                word_starts[word_start_positions] = 1 
-                word_starts = np.logical_and(word_starts, np.array(input_ids) != self.utterance_boundary_token) # Utterance boundaries are not word boundaries
-                word_starts[0] = 1 # First token is always a word start
+                word_starts[word_start_positions] = 1
+                word_starts = np.logical_and(
+                    word_starts, np.array(input_ids) != self.utterance_boundary_token
+                )  # Utterance boundaries are not word boundaries
+                word_starts[0] = 1  # First token is always a word start
                 word_starts_list.append(word_starts)
 
         if self.remove_word_boundaries:
