@@ -2,7 +2,7 @@ defaults:
   - base_config
   - _self_
   - model: gpt2_85M
-  - dataset: childes_english_phonemes
+  - dataset: childes_english_phoneme
   - tokenizer: childes_english_phoneme
   - experiment: base_experiment # Must be last deafult
 

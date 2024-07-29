@@ -2,7 +2,7 @@
 defaults:
   - base_experiment
   - override /model: ??? # Must provide model
-  - override /dataset: babylm_strict_phonemes
+  - override /dataset: babylm_strict_phoneme
 
 data_preprocessing:
   max_input_length: 128
