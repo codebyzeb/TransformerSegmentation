@@ -19,9 +19,9 @@ def blimp_evaluation(model, tokenizer, model_path, batch_size, tasks, device, is
 
     task_list = tasks.split(",")
     if is_phonemized:
-        task_manager = lm_eval.tasks.TaskManager(override_data_path="evaluation_data/blimp_filtered_phonemized")
+        task_manager = lm_eval.tasks.TaskManager(override_data_path="evaluation_data/babylm_eval_phonemized")
     else:
-        task_manager = lm_eval.tasks.TaskManager()
+        task_manager = lm_eval.tasks.TaskManager(override_data_path="evaluation_data/babylm_eval")
     task_names = task_manager.match_tasks(task_list)
 
     logging.info(f"Running BLIMP evaluation for {task_names}")
