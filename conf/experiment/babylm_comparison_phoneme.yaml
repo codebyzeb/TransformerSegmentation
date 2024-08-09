@@ -4,16 +4,19 @@ defaults:
   - override /model: ??? # Must provide model
   - override /dataset: babylm_strict_phoneme
 
+dataset:
+  subconfig: 'strict-small'
+
 data_preprocessing:
   max_input_length: 128
   join_utts: "static"
   remove_word_boundaries: False
 
 experiment:
-  group: babylm
+  group: babylm-small
   evaluate_babyslm: True
   evaluate_segmentation: False
-  blimp_tasks: 'blimp_filtered'
+  blimp_tasks: 'blimp_filtered,blimp_supplement'
 
 trainer:
   eval_steps: 50_000 # Only evaluate every 25% of training since blimp is slow

@@ -11,7 +11,7 @@ from omegaconf import OmegaConf
 # training pipeline imports
 from hydra.core.config_store import ConfigStore
 from transformers.data import DataCollatorForLanguageModeling
-from transformers.trainer import TrainingArguments
+from transformers.trainer import TrainingArguments, TrainerState
 
 # wandb for logging metrics
 import wandb
@@ -254,8 +254,19 @@ def main(cfg: TransformerSegmentationConfig):
     if not cfg.experiment.resume_checkpoint_path:
         trainer.evaluate()
 
+    # If resuming from final checkpoint, re-evaluate the final model and don't train
+    elif (
+        cfg.experiment.resume_checkpoint_path
+        and int(cfg.experiment.resume_checkpoint_path.split("/")[-1].split("-")[-1]) == cfg.trainer.max_training_steps
+    ):
+        trainer._load_from_checkpoint(cfg.experiment.resume_checkpoint_path)
+        trainer.state = TrainerState.load_from_json(os.path.join(cfg.experiment.resume_checkpoint_path, "trainer_state.json"))
+        trainer.evaluate()
+        trainer._load_best_model()
+
     # Train model
-    trainer.train(resume_from_checkpoint=cfg.experiment.resume_checkpoint_path)
+    else:
+        trainer.train(resume_from_checkpoint=cfg.experiment.resume_checkpoint_path)
 
     # Evaluate best model
     trainer.stride_evaluation = 2
