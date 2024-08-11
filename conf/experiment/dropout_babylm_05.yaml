@@ -2,20 +2,25 @@
 defaults:
   - base_experiment
   - override /model: ??? # Must provide model
-  - override /dataset: babylm_strict_phonemes
+  - override /dataset: babylm_strict_phoneme
+  - override /tokenizer: babylm_phoneme_spaceless
 
 data_preprocessing:
-  subsample: 100_000_000
+  subsample: ???
   subsample_type: 'words'
+  max_input_length: 128
+  join_utts: "static"
+  remove_word_boundaries: False
 
 experiment:
-  group: dropout
+  group: babylm-size-phonemes
   evaluate_babyslm: True
   evaluate_segmentation: False
-  blimp_tasks: 'blimp_filtered'
+  blimp_tasks: 'blimp_filtered,blimp_supplement'
 
 trainer:
   eval_steps: 50_000 # Only evaluate every 25% of training since blimp is slow
+  save_steps: 50_000
 
 model:
   model_kwargs: {

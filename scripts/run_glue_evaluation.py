@@ -67,15 +67,19 @@ def main():
             # "True",
         ]
 
-        sys.argv = args
-        finetune_classification.main()
+        # Only run evaluation if it hasn't been run yet
+        if not os.path.exists(out_dir + "eval_results.json"):
+            sys.argv = args
+            finetune_classification.main()
 
         # Read json results
         with open(out_dir + "eval_results.json", "r") as f:
             results = json.load(f)
 
-        task_results[f"eval/glue_{task}_accuracy"] = results["eval_accuracy"]
-        task_results[f"eval/glue_{task}_f1"] = results["eval_f1"]
+        if "eval_accuracy" in results:
+            task_results[f"eval/glue_{task}_accuracy"] = results["eval_accuracy"]
+        if "eval_f1" in results:
+            task_results[f"eval/glue_{task}_f1"] = results["eval_f1"]
 
         wandb.finish()
 
