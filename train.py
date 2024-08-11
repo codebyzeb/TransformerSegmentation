@@ -176,6 +176,13 @@ def main(cfg: TransformerSegmentationConfig):
     # preprocessing removes word boundaries, which we need as labels for evaluation.
     segment_eval_sentences = dataset["valid"]["text"] if cfg.experiment.evaluate_segmentation else None
 
+    # Subsample words before tokenization as this may remove word boundaries
+    if cfg.data_preprocessing.subsample is not None and cfg.data_preprocessing.subsample_type == "words":
+        logger.info(f"Subsampling dataset to {cfg.data_preprocessing.subsample} {cfg.data_preprocessing.subsample_type}")
+        dataset["train"] = setup.subsample_dataset_pre_tokenized(
+            dataset["train"], cfg.data_preprocessing.subsample, cfg.data_preprocessing.subsample_type
+        )
+
     # Preprocess data
     logger.info("Preprocessing data")
     data_preprocessor = DataPreprocessor(cfg.data_preprocessing, tokenizer, get_word_boundaries=cfg.experiment.evaluate_segmentation)
@@ -188,9 +195,9 @@ def main(cfg: TransformerSegmentationConfig):
     train_dataset = processed_dataset["train"]
     eval_dataset = processed_dataset["valid"]
 
-    # Subsample training dataset
-    if cfg.data_preprocessing.subsample is not None:
-        logger.info(f"Subsampling dataset by {cfg.data_preprocessing.subsample} {cfg.data_preprocessing.subsample_type}")
+    # Subsample training dataset for other subsampling types
+    if cfg.data_preprocessing.subsample is not None and cfg.data_preprocessing.subsample_type != "words":
+        logger.info(f"Subsampling dataset to {cfg.data_preprocessing.subsample} {cfg.data_preprocessing.subsample_type}")
         train_dataset = setup.subsample_dataset(train_dataset, cfg.data_preprocessing.subsample, cfg.data_preprocessing.subsample_type)
 
     # Report key metrics
@@ -255,7 +262,7 @@ def main(cfg: TransformerSegmentationConfig):
         trainer.evaluate()
 
     # If resuming from final checkpoint, re-evaluate the final model and don't train
-    elif (
+    if (
         cfg.experiment.resume_checkpoint_path
         and int(cfg.experiment.resume_checkpoint_path.split("/")[-1].split("-")[-1]) == cfg.trainer.max_training_steps
     ):
@@ -263,6 +270,8 @@ def main(cfg: TransformerSegmentationConfig):
         trainer.state = TrainerState.load_from_json(os.path.join(cfg.experiment.resume_checkpoint_path, "trainer_state.json"))
         trainer.evaluate()
         trainer._load_best_model()
+        trainer.stride_evaluation = 2
+        trainer.evaluate(metric_key_prefix="eval_best")
 
     # Train model
     else:
