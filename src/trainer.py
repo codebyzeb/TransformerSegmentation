@@ -68,7 +68,7 @@ class CustomTrainer(Trainer):
 
         super().__init__(**kwargs)
 
-    def init_git_repo(self, at_init: bool = False) -> None:
+    def init_hf_repo(self, token: Optional[str] = None):
         """
         Initializes a git repo in `self.args.hub_model_id`.
         Args:
@@ -86,10 +86,12 @@ class CustomTrainer(Trainer):
         if "/" not in repo_name:
             repo_name = get_full_repo_name(repo_name, token=self.args.hub_token)
 
+        token = token if token is not None else self.args.hub_token
+
         # Make sure the repo exists.
-        create_repo(
+        repo_url = create_repo(
             repo_name,
-            token=self.args.hub_token,
+            token=token,
             private=self.args.hub_private_repo,
             exist_ok=True,
         )
@@ -97,22 +99,25 @@ class CustomTrainer(Trainer):
             self.repo = Repository(
                 self.args.output_dir,
                 clone_from=repo_name,
-                token=self.args.hub_token,
+                token=token,
                 revision=self.experiment_name,
             )
         except EnvironmentError:
-            if self.args.overwrite_output_dir and at_init:
+            if self.args.overwrite_output_dir and self.hub_model_id is None:
                 # Try again after wiping output_dir
                 shutil.rmtree(self.args.output_dir)
                 self.repo = Repository(
                     self.args.output_dir,
                     clone_from=repo_name,
-                    token=self.args.hub_token,
+                    token=token,
                     revision=self.experiment_name,
                 )
             else:
-                raise
+                raise ValueError(
+                    f"Could not clone the repo {repo_name} to {self.args.output_dir}."
+                )
 
+        self.hub_model_id = repo_url.repo_id
         try:
             # the branch name should have been created already by the `create_repo` call
             self.repo.git_pull()

@@ -24,27 +24,32 @@ def main():
     group = checkpoint_path.split("/")[1]
     name = checkpoint_path.split("/")[2]
 
+    evaluation_folder = "evaluation_data/babylm_eval_phonemized/glue_filtered" if "phoneme" in checkpoint_path else "evaluation_data/babylm_eval/glue_filtered"
+
     task_results = {}
 
     for task in TASKS:
+
         out_dir = f"checkpoints/finetune/{group}/{name}/{task}/"
+        model_path = f"checkpoints/finetune/{group}/{name}/mnli" if task == "mnli-mm" else checkpoint_path
+        train_file = f"{evaluation_folder}/mnli.train.jsonl" if task == "mnli-mm" else f"{evaluation_folder}/{task}.train.jsonl"
+        valid_file = f"{evaluation_folder}/{task}.valid.jsonl"
+        do_train = "False" if task == "mnli-mm" else "True"
 
         args = [
             "submodules/evaluation-pipeline-2024/finetune_classification.py",
             "--model_name_or_path",
-            f"checkpoints/finetune/{group}/{name}/mnli" if task == "mnli-mm" else f"checkpoints/{group}/{name}",
+            model_path,
             "--output_dir",
             f"{out_dir}",
             "--train_file",
-            f"evaluation_data/babylm_eval/glue_filtered/{'mnli' if task == 'mnli-mm' else task}.train.jsonl",
+            train_file,
             "--validation_file",
-            f"evaluation_data/babylm_eval/glue_filtered/{task}.valid.jsonl",
+            valid_file,
             "--do_train",
-            "False" if task == "mnli-mm" else "True",
+            do_train,
             "--do_eval",
             "--do_predict",
-            # "--use_fast_tokenizer",
-            # "False",
             "--max_seq_length",
             "128",
             "--per_device_train_batch_size",
